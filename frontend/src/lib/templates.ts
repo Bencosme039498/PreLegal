@@ -7,33 +7,36 @@ import type { TemplateField } from "./fill-template";
 // single source of truth; the frontend reads it rather than keeping a copy.
 const TEMPLATES_DIR = join(process.cwd(), "..", "data", "templates");
 
-interface CatalogEntry {
+/** A template's catalog entry (data/templates/catalog.json). */
+export interface TemplateSummary {
   id: string;
   name: string;
+  category: string;
   description: string;
   file: string;
   fields: TemplateField[];
 }
 
-export interface Template {
-  id: string;
-  name: string;
-  description: string;
-  fields: TemplateField[];
+export interface Template extends TemplateSummary {
+  /** Markdown with `{{field_key}}` placeholders. */
   body: string;
 }
 
-/**
- * Loads a template's metadata, fields and Markdown body. Uses synchronous reads,
- * which Next.js prerenders at build time, so the page ships as static HTML.
- */
-export function loadTemplate(id: string): Template {
-  const catalog = JSON.parse(readFileSync(join(TEMPLATES_DIR, "catalog.json"), "utf8")) as {
-    templates: CatalogEntry[];
-  };
-  const entry = catalog.templates.find((t) => t.id === id);
-  if (!entry) throw new Error(`Template "${id}" not found in catalog.json`);
+// Synchronous reads are prerendered by Next.js at build time, so every page
+// that uses them ships as static HTML.
+function readCatalog(): TemplateSummary[] {
+  return (JSON.parse(readFileSync(join(TEMPLATES_DIR, "catalog.json"), "utf8")) as { templates: TemplateSummary[] })
+    .templates;
+}
 
-  const body = readFileSync(join(TEMPLATES_DIR, entry.file), "utf8");
-  return { id: entry.id, name: entry.name, description: entry.description, fields: entry.fields, body };
+/** All templates in catalog order. */
+export function listTemplates(): TemplateSummary[] {
+  return readCatalog();
+}
+
+/** A template's metadata, fields and Markdown body, or `undefined` if the id is unknown. */
+export function loadTemplate(id: string): Template | undefined {
+  const entry = readCatalog().find((t) => t.id === id);
+  if (!entry) return undefined;
+  return { ...entry, body: readFileSync(join(TEMPLATES_DIR, entry.file), "utf8") };
 }

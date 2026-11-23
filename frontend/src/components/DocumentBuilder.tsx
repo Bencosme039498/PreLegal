@@ -2,39 +2,40 @@
 
 import { useMemo, useState } from "react";
 import Markdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
   documentFilename,
   fillTemplate,
   initialValues,
   incompleteFields,
+  type FieldSection,
   type FieldValues,
-  type TemplateField,
 } from "@/lib/fill-template";
 import { FieldInput } from "./FieldInput";
 
-export interface FieldSection {
-  title: string;
-  fields: TemplateField[];
-}
-
-interface NdaBuilderProps {
+interface DocumentBuilderProps {
+  /** Document name, used as the start of downloaded file names. */
+  name: string;
   /** Template Markdown containing `{{field_key}}` placeholders. */
   body: string;
-  fields: TemplateField[];
+  /** The template's fields grouped into form sections (see groupFields). */
   sections: FieldSection[];
-  /** Prefix for downloaded file names, e.g. "Mutual-NDA". */
-  fileBase: string;
 }
 
-/** Form + live preview of the filled document, with Markdown and PDF downloads. */
-export function NdaBuilder({ body, fields, sections, fileBase }: NdaBuilderProps) {
+const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+
+/** Form + live preview of a filled-in template, with Markdown and PDF downloads. */
+export function DocumentBuilder({ name, body, sections }: DocumentBuilderProps) {
+  const fields = useMemo(() => sections.flatMap((s) => s.fields), [sections]);
   const [values, setValues] = useState<FieldValues>(() => initialValues(fields));
 
   const markdown = useMemo(() => fillTemplate(body, fields, values), [body, fields, values]);
   const incomplete = incompleteFields(fields, values);
   const ready = incomplete.length === 0;
-  const filename = documentFilename(fileBase, values.party_a_name ?? "", values.party_b_name ?? "");
+  // e.g. "Mutual-Non-Disclosure-Agreement_Acme-Inc_Globex-LLC": the document name plus the first two parties.
+  const partyNames = sections.flatMap((s) => (s.nameKey ? [values[s.nameKey]] : [])).slice(0, 2);
+  const filename = documentFilename(name, ...partyNames);
 
   const setValue = (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value }));
 
@@ -110,7 +111,7 @@ export function NdaBuilder({ body, fields, sections, fileBase }: NdaBuilderProps
             "print:max-h-none print:overflow-visible print:rounded-none print:border-0 print:p-0 print:shadow-none"
           }
         >
-          <Markdown remarkPlugins={[remarkGfm]}>{markdown}</Markdown>
+          <Markdown remarkPlugins={REMARK_PLUGINS}>{markdown}</Markdown>
         </article>
       </section>
     </div>

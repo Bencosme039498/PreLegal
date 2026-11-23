@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import catalog from "../../../data/templates/catalog.json";
 import {
   documentFilename,
   escapeMarkdown,
   fillTemplate,
   formatDate,
+  groupFields,
   incompleteFields,
   initialValues,
   isFilled,
@@ -17,6 +19,7 @@ const fields: TemplateField[] = [
   { key: "term_years", label: "Agreement term (years)", type: "integer", required: true, default: 2 },
   { key: "notes", label: "Notes", type: "textarea", required: false },
 ];
+const catalogFields = (id: string) => catalog.templates.find((t) => t.id === id)!.fields as TemplateField[];
 
 describe("initialValues", () => {
   it("uses catalog defaults and blanks elsewhere", () => {
@@ -69,9 +72,23 @@ describe("escapeMarkdown", () => {
   });
 
   it("leaves ordinary punctuation readable", () => {
-    expect(escapeMarkdown("Acme, Inc. - Suite #5 (HQ)")).toBe("Acme, Inc. - Suite #5 (HQ)");
+    expect(escapeMarkdown("Acme, Inc. - Suite #5 (HQ) & Sons")).toBe("Acme, Inc. - Suite #5 (HQ) & Sons");
   });
 
+  it("escapes HTML entities so they are not decoded", () => {
+    expect(escapeMarkdown("&copy; &#169;")).toBe(String.raw`\&copy; \&#169;`);
+  });
+
+  it("escapes block syntax at the start of a line", () => {
+    expect(escapeMarkdown("# Phase 1")).toBe(String.raw`\# Phase 1`);
+    expect(escapeMarkdown("- item")).toBe(String.raw`\- item`);
+    expect(escapeMarkdown("> quote")).toBe(String.raw`\> quote`);
+    expect(escapeMarkdown("---")).toBe(String.raw`\---`);
+    expect(escapeMarkdown("===")).toBe(String.raw`\===`);
+    expect(escapeMarkdown("1. First")).toBe(String.raw`1\. First`);
+    expect(escapeMarkdown("2) Second")).toBe(String.raw`2\) Second`);
+    expect(escapeMarkdown("2026 budget")).toBe("2026 budget");
+  });
 });
 
 describe("singleLine", () => {
@@ -93,6 +110,12 @@ describe("fillTemplate", () => {
     expect(out).toBe("Dated November 23, 2026 by **Acme\\_Co \\*Ltd\\*** for 3 year(s). {{unknown}}");
   });
 
+  it("keeps line breaks in textarea values, escaping each line", () => {
+    const notes = ["1. Kickoff", "", "  - Design *v1*  ", "Done"].join("\r\n");
+    const out = fillTemplate("{{notes}}", fields, { notes });
+    expect(out).toBe([String.raw`1\. Kickoff`, String.raw`\- Design \*v1\*`, "Done"].join("\n"));
+  });
+
   it("renders blank and invalid fields as a highlighted label", () => {
     const out = fillTemplate(body, fields, { effective_date: "", party_a_name: " ", term_years: "-3" });
     expect(out).toBe(
@@ -103,9 +126,43 @@ describe("fillTemplate", () => {
 
 describe("documentFilename", () => {
   it("joins slugified parts and drops empty ones", () => {
-    expect(documentFilename("Mutual-NDA", "Acme, Inc.", "Société Générale")).toBe(
-      "Mutual-NDA_Acme-Inc_Societe-Generale",
+    expect(documentFilename("Mutual Non-Disclosure Agreement", "Acme, Inc.", "Société Générale")).toBe(
+      "Mutual-Non-Disclosure-Agreement_Acme-Inc_Societe-Generale",
     );
-    expect(documentFilename("Mutual-NDA", "", "  ")).toBe("Mutual-NDA");
+    expect(documentFilename("Promissory Note", "", "  ")).toBe("Promissory-Note");
+  });
+});
+
+describe("groupFields", () => {
+  const titles = (id: string) => groupFields(catalogFields(id)).map((s) => s.title);
+
+  it("groups each catalog template into its parties plus Details", () => {
+    expect(titles("mutual-nda")).toEqual(["Party A", "Party B", "Details"]);
+    expect(titles("unilateral-nda")).toEqual(["Discloser", "Recipient", "Details"]);
+    expect(titles("independent-contractor-agreement")).toEqual(["Client", "Contractor", "Details"]);
+    expect(titles("consulting-services-agreement")).toEqual(["Client", "Consultant", "Details"]);
+    expect(titles("employment-offer-letter")).toEqual(["Candidate", "Hiring Manager", "Details"]);
+    expect(titles("ip-assignment-agreement")).toEqual(["Assignor", "Assignee", "Details"]);
+    expect(titles("promissory-note")).toEqual(["Borrower", "Lender", "Details"]);
+    expect(titles("general-release")).toEqual(["Releasor", "Releasee", "Details"]);
+  });
+
+  it("keeps nested prefixes inside their party and every field exactly once", () => {
+    const fields = catalogFields("mutual-nda");
+    const sections = groupFields(fields);
+    expect(sections[0].fields.map((f) => f.key)).toEqual([
+      "party_a_name",
+      "party_a_entity_type",
+      "party_a_address",
+      "party_a_signatory_name",
+      "party_a_signatory_title",
+    ]);
+    expect(sections[0].nameKey).toBe("party_a_name");
+    expect(sections.flatMap((s) => s.fields).length).toBe(fields.length);
+  });
+
+  it("puts lone *_name fields in Details", () => {
+    const details = groupFields(catalogFields("employment-offer-letter")).at(-1)!;
+    expect(details.fields.map((f) => f.key)).toEqual(expect.arrayContaining(["company_name", "manager_name"]));
   });
 });
