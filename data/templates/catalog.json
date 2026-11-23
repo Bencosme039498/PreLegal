@@ -1,0 +1,777 @@
+{
+  "$schema": "./catalog.schema.json",
+  "version": 1,
+  "placeholderSyntax": "{{field_key}}",
+  "templates": [
+    {
+      "id": "mutual-nda",
+      "name": "Mutual Non-Disclosure Agreement",
+      "category": "confidentiality",
+      "description": "Two-way NDA for parties that will both share confidential information, e.g. when exploring a partnership.",
+      "file": "mutual-nda.md",
+      "format": "markdown",
+      "jurisdiction": "generic",
+      "fields": [
+        {
+          "key": "effective_date",
+          "label": "Effective date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "party_a_name",
+          "label": "Party A legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "party_a_entity_type",
+          "label": "Party A entity type",
+          "type": "text",
+          "required": true,
+          "example": "Delaware corporation"
+        },
+        {
+          "key": "party_a_address",
+          "label": "Party A address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "party_a_signatory_name",
+          "label": "Party A signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "party_a_signatory_title",
+          "label": "Party A signatory title",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "party_b_name",
+          "label": "Party B legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "party_b_entity_type",
+          "label": "Party B entity type",
+          "type": "text",
+          "required": true,
+          "example": "Delaware corporation"
+        },
+        {
+          "key": "party_b_address",
+          "label": "Party B address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "party_b_signatory_name",
+          "label": "Party B signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "party_b_signatory_title",
+          "label": "Party B signatory title",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "purpose",
+          "label": "Purpose of disclosure",
+          "type": "textarea",
+          "required": true,
+          "example": "evaluating a potential business partnership"
+        },
+        {
+          "key": "term_years",
+          "label": "Agreement term (years)",
+          "type": "integer",
+          "required": true,
+          "default": 2
+        },
+        {
+          "key": "confidentiality_period_years",
+          "label": "Confidentiality period (years)",
+          "type": "integer",
+          "required": true,
+          "default": 3
+        },
+        {
+          "key": "governing_law",
+          "label": "Governing law (state / country)",
+          "type": "text",
+          "required": true,
+          "example": "the State of New York"
+        },
+        {
+          "key": "jurisdiction",
+          "label": "Courts with jurisdiction",
+          "type": "text",
+          "required": true,
+          "example": "New York County, New York"
+        }
+      ]
+    },
+    {
+      "id": "unilateral-nda",
+      "name": "Unilateral Non-Disclosure Agreement",
+      "category": "confidentiality",
+      "description": "One-way NDA where only one party discloses confidential information to the other.",
+      "file": "unilateral-nda.md",
+      "format": "markdown",
+      "jurisdiction": "generic",
+      "fields": [
+        {
+          "key": "effective_date",
+          "label": "Effective date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "discloser_name",
+          "label": "Disclosing party legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "discloser_address",
+          "label": "Disclosing party address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "discloser_signatory_name",
+          "label": "Disclosing party signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "recipient_name",
+          "label": "Receiving party legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "recipient_address",
+          "label": "Receiving party address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "recipient_signatory_name",
+          "label": "Receiving party signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "purpose",
+          "label": "Purpose of disclosure",
+          "type": "textarea",
+          "required": true,
+          "example": "evaluating a potential business partnership"
+        },
+        {
+          "key": "confidentiality_period_years",
+          "label": "Confidentiality period (years)",
+          "type": "integer",
+          "required": true,
+          "default": 3
+        },
+        {
+          "key": "governing_law",
+          "label": "Governing law (state / country)",
+          "type": "text",
+          "required": true,
+          "example": "the State of New York"
+        }
+      ]
+    },
+    {
+      "id": "independent-contractor-agreement",
+      "name": "Independent Contractor Agreement",
+      "category": "services",
+      "description": "Engages an individual or business as an independent contractor, with IP assignment and confidentiality.",
+      "file": "independent-contractor-agreement.md",
+      "format": "markdown",
+      "jurisdiction": "generic",
+      "fields": [
+        {
+          "key": "effective_date",
+          "label": "Effective date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "client_name",
+          "label": "Client legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "client_address",
+          "label": "Client address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "client_signatory_name",
+          "label": "Client signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "client_signatory_title",
+          "label": "Client signatory title",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "contractor_name",
+          "label": "Contractor legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "contractor_address",
+          "label": "Contractor address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "services_description",
+          "label": "Description of services",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "end_date",
+          "label": "End date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "compensation",
+          "label": "Compensation",
+          "type": "text",
+          "required": true,
+          "example": "$75 per hour"
+        },
+        {
+          "key": "invoice_frequency",
+          "label": "Invoice frequency",
+          "type": "select",
+          "required": true,
+          "options": [
+            "weekly",
+            "bi-weekly",
+            "monthly",
+            "upon completion"
+          ],
+          "default": "monthly"
+        },
+        {
+          "key": "payment_terms_days",
+          "label": "Payment terms (days)",
+          "type": "integer",
+          "required": true,
+          "default": 30
+        },
+        {
+          "key": "termination_notice_days",
+          "label": "Termination notice (days)",
+          "type": "integer",
+          "required": true,
+          "default": 14
+        },
+        {
+          "key": "governing_law",
+          "label": "Governing law (state / country)",
+          "type": "text",
+          "required": true,
+          "example": "the State of New York"
+        }
+      ]
+    },
+    {
+      "id": "consulting-services-agreement",
+      "name": "Consulting Services Agreement",
+      "category": "services",
+      "description": "Hourly consulting engagement with defined scope, deliverables, fee cap, and limitation of liability.",
+      "file": "consulting-services-agreement.md",
+      "format": "markdown",
+      "jurisdiction": "generic",
+      "fields": [
+        {
+          "key": "effective_date",
+          "label": "Effective date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "client_name",
+          "label": "Client legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "client_entity_type",
+          "label": "Client entity type",
+          "type": "text",
+          "required": true,
+          "example": "Delaware corporation"
+        },
+        {
+          "key": "client_address",
+          "label": "Client address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "client_signatory_name",
+          "label": "Client signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "client_signatory_title",
+          "label": "Client signatory title",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "consultant_name",
+          "label": "Consultant legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "consultant_entity_type",
+          "label": "Consultant entity type",
+          "type": "text",
+          "required": true,
+          "example": "Delaware corporation"
+        },
+        {
+          "key": "consultant_address",
+          "label": "Consultant address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "consultant_signatory_name",
+          "label": "Consultant signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "consultant_signatory_title",
+          "label": "Consultant signatory title",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "scope_of_services",
+          "label": "Scope of services",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "deliverables",
+          "label": "Deliverables and schedule",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "hourly_rate",
+          "label": "Hourly rate",
+          "type": "money",
+          "required": true,
+          "example": "$150"
+        },
+        {
+          "key": "fee_cap",
+          "label": "Fee cap",
+          "type": "money",
+          "required": true,
+          "example": "$20,000"
+        },
+        {
+          "key": "payment_terms_days",
+          "label": "Payment terms (days)",
+          "type": "integer",
+          "required": true,
+          "default": 30
+        },
+        {
+          "key": "termination_notice_days",
+          "label": "Termination notice (days)",
+          "type": "integer",
+          "required": true,
+          "default": 14
+        },
+        {
+          "key": "governing_law",
+          "label": "Governing law (state / country)",
+          "type": "text",
+          "required": true,
+          "example": "the State of New York"
+        }
+      ]
+    },
+    {
+      "id": "employment-offer-letter",
+      "name": "Employment Offer Letter",
+      "category": "employment",
+      "description": "At-will employment offer covering position, start date, salary, and benefits.",
+      "file": "employment-offer-letter.md",
+      "format": "markdown",
+      "jurisdiction": "generic",
+      "fields": [
+        {
+          "key": "offer_date",
+          "label": "Offer date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "candidate_name",
+          "label": "Candidate full name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "candidate_address",
+          "label": "Candidate address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "company_name",
+          "label": "Company legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "job_title",
+          "label": "Job title",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "manager_name",
+          "label": "Reports to (manager name)",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "work_location",
+          "label": "Work location",
+          "type": "text",
+          "required": true,
+          "example": "Remote"
+        },
+        {
+          "key": "employment_type",
+          "label": "Employment type",
+          "type": "select",
+          "required": true,
+          "options": [
+            "full-time",
+            "part-time"
+          ],
+          "default": "full-time"
+        },
+        {
+          "key": "start_date",
+          "label": "Start date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "base_salary",
+          "label": "Base salary",
+          "type": "text",
+          "required": true,
+          "example": "$95,000 per year"
+        },
+        {
+          "key": "benefits_summary",
+          "label": "Benefits summary",
+          "type": "textarea",
+          "required": true,
+          "example": "health, dental, and vision insurance; 401(k); 15 days paid time off"
+        },
+        {
+          "key": "offer_expiration_date",
+          "label": "Offer expiration date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "hiring_manager_name",
+          "label": "Signing manager name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "hiring_manager_title",
+          "label": "Signing manager title",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "ip-assignment-agreement",
+      "name": "Intellectual Property Assignment Agreement",
+      "category": "intellectual-property",
+      "description": "Transfers ownership of specified intellectual property from an assignor to an assignee.",
+      "file": "ip-assignment-agreement.md",
+      "format": "markdown",
+      "jurisdiction": "generic",
+      "fields": [
+        {
+          "key": "effective_date",
+          "label": "Effective date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "assignor_name",
+          "label": "Assignor legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "assignor_address",
+          "label": "Assignor address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "assignor_signatory_name",
+          "label": "Assignor signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "assignee_name",
+          "label": "Assignee legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "assignee_address",
+          "label": "Assignee address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "assignee_signatory_name",
+          "label": "Assignee signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "assigned_property_description",
+          "label": "Description of assigned property",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "consideration",
+          "label": "Consideration",
+          "type": "text",
+          "required": true,
+          "example": "the payment of $1,000"
+        },
+        {
+          "key": "governing_law",
+          "label": "Governing law (state / country)",
+          "type": "text",
+          "required": true,
+          "example": "the State of New York"
+        }
+      ]
+    },
+    {
+      "id": "promissory-note",
+      "name": "Promissory Note",
+      "category": "finance",
+      "description": "Borrower's written promise to repay a loan with fixed interest on a defined schedule.",
+      "file": "promissory-note.md",
+      "format": "markdown",
+      "jurisdiction": "generic",
+      "fields": [
+        {
+          "key": "principal_amount",
+          "label": "Principal amount",
+          "type": "money",
+          "required": true,
+          "example": "$10,000"
+        },
+        {
+          "key": "effective_date",
+          "label": "Effective date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "place_of_execution",
+          "label": "Place of execution",
+          "type": "text",
+          "required": true,
+          "example": "Miami, Florida"
+        },
+        {
+          "key": "borrower_name",
+          "label": "Borrower legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "borrower_address",
+          "label": "Borrower address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "lender_name",
+          "label": "Lender legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "lender_address",
+          "label": "Lender address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "interest_rate",
+          "label": "Annual interest rate",
+          "type": "percent",
+          "required": true,
+          "example": "5%"
+        },
+        {
+          "key": "repayment_schedule",
+          "label": "Repayment schedule",
+          "type": "textarea",
+          "required": true,
+          "example": "12 equal monthly installments of $856.07 beginning on January 1, 2027"
+        },
+        {
+          "key": "maturity_date",
+          "label": "Maturity date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "grace_period_days",
+          "label": "Grace period (days)",
+          "type": "integer",
+          "required": true,
+          "default": 10
+        },
+        {
+          "key": "late_fee",
+          "label": "Late fee",
+          "type": "money",
+          "required": true,
+          "example": "$50"
+        },
+        {
+          "key": "governing_law",
+          "label": "Governing law (state / country)",
+          "type": "text",
+          "required": true,
+          "example": "the State of New York"
+        }
+      ]
+    },
+    {
+      "id": "general-release",
+      "name": "General Release of Claims",
+      "category": "disputes",
+      "description": "Settles a dispute by releasing claims in exchange for a payment.",
+      "file": "general-release.md",
+      "format": "markdown",
+      "jurisdiction": "generic",
+      "fields": [
+        {
+          "key": "effective_date",
+          "label": "Effective date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "releasor_name",
+          "label": "Releasor legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "releasor_address",
+          "label": "Releasor address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "releasor_signatory_name",
+          "label": "Releasor signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "releasee_name",
+          "label": "Releasee legal name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "releasee_address",
+          "label": "Releasee address",
+          "type": "address",
+          "required": true
+        },
+        {
+          "key": "releasee_signatory_name",
+          "label": "Releasee signatory name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "matter_description",
+          "label": "Description of the matter being released",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "settlement_amount",
+          "label": "Settlement amount",
+          "type": "money",
+          "required": true
+        },
+        {
+          "key": "payment_date",
+          "label": "Payment date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "governing_law",
+          "label": "Governing law (state / country)",
+          "type": "text",
+          "required": true,
+          "example": "the State of New York"
+        }
+      ]
+    }
+  ]
+}
