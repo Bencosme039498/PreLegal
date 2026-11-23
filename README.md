@@ -1,6 +1,8 @@
 # PreLegal
 A platform for drafting common legal agreements
 
+**🌐 Live site: <https://prelegal-blue.vercel.app>**: pick a template (e.g. the [Mutual NDA](https://prelegal-blue.vercel.app/templates/mutual-nda)), fill in the details, and download the agreement as PDF or Markdown.
+
 > 🚧 **Status: In progress.** This project is under active development and is expected to be completed within 1 week (target: November 28, 2026).
 
 ## Project structure
