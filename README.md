@@ -1,9 +1,26 @@
 # PreLegal
 A platform for drafting common legal agreements
 
-**🌐 Live site: <https://prelegal-blue.vercel.app>**: pick a template (e.g. the [Mutual NDA](https://prelegal-blue.vercel.app/templates/mutual-nda)), fill in the details, and download the agreement as PDF or Markdown.
+**🌐 Live site: <https://prelegal-blue.vercel.app>**
+
+PreLegal is a generic document creator: pick any template, fill in a form, watch the agreement update live as you type, and download the completed document as PDF or Markdown. The forms and documents come straight from the template dataset in [`data/templates`](data/templates), so adding a template to the catalog adds it to the site.
 
 > 🚧 **Status: In progress.** This project is under active development and is expected to be completed within 1 week (target: November 28, 2026).
+
+## What you can draft
+
+| Document | Category | Description |
+| --- | --- | --- |
+| [Mutual Non-Disclosure Agreement](https://prelegal-blue.vercel.app/templates/mutual-nda) | confidentiality | Two-way NDA for parties that will both share confidential information, e.g. when exploring a partnership. |
+| [Unilateral Non-Disclosure Agreement](https://prelegal-blue.vercel.app/templates/unilateral-nda) | confidentiality | One-way NDA where only one party discloses confidential information to the other. |
+| [Independent Contractor Agreement](https://prelegal-blue.vercel.app/templates/independent-contractor-agreement) | services | Engages an individual or business as an independent contractor, with IP assignment and confidentiality. |
+| [Consulting Services Agreement](https://prelegal-blue.vercel.app/templates/consulting-services-agreement) | services | Hourly consulting engagement with defined scope, deliverables, fee cap, and limitation of liability. |
+| [Employment Offer Letter](https://prelegal-blue.vercel.app/templates/employment-offer-letter) | employment | At-will employment offer covering position, start date, salary, and benefits. |
+| [Intellectual Property Assignment Agreement](https://prelegal-blue.vercel.app/templates/ip-assignment-agreement) | intellectual property | Transfers ownership of specified intellectual property from an assignor to an assignee. |
+| [Promissory Note](https://prelegal-blue.vercel.app/templates/promissory-note) | finance | Borrower's written promise to repay a loan with fixed interest on a defined schedule. |
+| [General Release of Claims](https://prelegal-blue.vercel.app/templates/general-release) | disputes | Settles a dispute by releasing claims in exchange for a payment. |
+
+> ⚠️ The templates are general-purpose starting points, **not legal advice**. Have a qualified attorney review a document before real use.
 
 ## Project structure
 
