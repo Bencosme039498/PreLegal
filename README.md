@@ -22,10 +22,37 @@ PreLegal is a generic document creator: pick any template, fill in a form, watch
 
 > ⚠️ The templates are general-purpose starting points, **not legal advice**. Have a qualified attorney review a document before real use.
 
+## Screenshots
+
+Captured from the live site (<https://prelegal-blue.vercel.app>) on November 23, 2026, so the frontend stays documented even if the deployment goes offline. All names, companies and addresses are fictional.
+
+**Home: every template in the catalog**
+
+![Home page listing all templates](docs/screenshots/01-home.png)
+
+**Empty form: fields still to complete are highlighted in the live preview, and downloads stay disabled**
+
+![Mutual NDA with an empty form](docs/screenshots/02-mutual-nda-empty.png)
+
+**Filled form: the agreement updates as you type**
+
+![Mutual NDA filled in with fictional data](docs/screenshots/03-mutual-nda-filled.png)
+
+**Any template works the same way, e.g. a Promissory Note**
+
+![Promissory Note filled in with fictional data](docs/screenshots/04-promissory-note-filled.png)
+
+| Mobile | PDF output (print view) |
+| --- | --- |
+| ![Mobile layout](docs/screenshots/05-mobile.png) | ![Print view used for the PDF download](docs/screenshots/06-pdf-print-view.png) |
+
+Sample output: [`sample-mutual-nda.pdf`](docs/screenshots/sample-mutual-nda.pdf), the completed Mutual NDA from the screenshots above, as produced by **Download PDF**.
+
 ## Project structure
 
 | Path | Description |
 | --- | --- |
+| [`docs/screenshots`](docs/screenshots) | Screenshots of the live site and a sample PDF |
 | [`data/templates`](data/templates) | Dataset of legal document templates and their field catalog |
 | [`frontend`](frontend) | Next.js app: document creator for every catalog template. See [frontend/README.md](frontend/README.md) |
 | [`scripts`](scripts) | Tooling, e.g. `validate-templates.mjs` |
