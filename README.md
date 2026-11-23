@@ -8,5 +8,5 @@ A platform for drafting common legal agreements
 | Path | Description |
 | --- | --- |
 | [`data/templates`](data/templates) | Dataset of legal document templates and their field catalog |
-| [`frontend`](frontend) | Next.js app: the Mutual NDA creator prototype. See [frontend/README.md](frontend/README.md) |
+| [`frontend`](frontend) | Next.js app: document creator for every catalog template. See [frontend/README.md](frontend/README.md) |
 | [`scripts`](scripts) | Tooling, e.g. `validate-templates.mjs` |
