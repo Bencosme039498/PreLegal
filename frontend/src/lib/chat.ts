@@ -1,5 +1,6 @@
-// AI chat that fills in a template's fields (PL-7: Mutual NDA only). All LLM calls happen in the
-// backend (POST /api/chat); this module is the client, its error handling and the per-tab storage.
+// AI chat that picks a document and fills in its fields. All LLM calls happen in the
+// backend (POST /api/chat); this module is the client, its error handling, the per-tab storage and
+// the handoff that carries a conversation to the document page the AI chose.
 import {
   ApiError,
   ApiUnavailableError,
@@ -17,7 +18,13 @@ export interface ChatMessage {
 
 export interface ChatTurnResult {
   reply: string;
-  /** Every field with a valid value after this turn (raw text; fillTemplate escapes it). */
+  /**
+   * The document the conversation is now about: null while the AI is still finding out what the
+   * user needs. When it differs from the template the request was about (the AI chose a document,
+   * or switched to another), the client opens that document's page.
+   */
+  template_id: string | null;
+  /** Every field of template_id with a valid value (raw text; fillTemplate escapes it). */
   values: FieldValues;
   complete: boolean;
 }
@@ -25,22 +32,24 @@ export interface ChatTurnResult {
 /** What the chat shows when a turn fails (same shape as the backend's coded error). */
 export type ChatFailure = ErrorEnvelope;
 
-/** Templates the assistant supports. PL-8 opens it to every template. */
-export const CHAT_TEMPLATE_IDS: readonly string[] = ["mutual-nda"];
-
-export const supportsChat = (templateId: string) => CHAT_TEMPLATE_IDS.includes(templateId);
-
 // Mirrors MAX_MESSAGE_CHARS in backend/app/schemas.py.
 export const MAX_MESSAGE_CHARS = 2000;
 /** Only the latest turns are sent (mirrors MAX_HISTORY in backend/app/chat.py): the values carry the document state. */
-const MAX_SENT_MESSAGES = 30;
-/** Above the backend's worst case (2 attempts x 20 s plus backoff), so its error arrives first. */
+export const MAX_SENT_MESSAGES = 30;
+/** Above the backend's per-request budget (chat_budget_s, 50 s), so its answer or error arrives first. */
 const CHAT_TIMEOUT_MS = 60_000;
 
-export function greeting(documentName: string): string {
+/** The assistant's opening message: for a given document, or (home page) to find the right one. */
+export function greeting(documentName?: string): string {
+  if (!documentName) {
+    return (
+      "Hi! What do you need to draft? Describe the document or your situation and I'll find the right " +
+      "template. If it's something we can't generate, I'll suggest the closest option."
+    );
+  }
   return (
-    `Hi! I'll help you draft a ${documentName}. Tell me about the two companies involved and what ` +
-    "information you'll be sharing. Any order is fine, and I'll ask about anything that's missing."
+    `Hi! I'll help you draft a ${documentName}. Tell me about the people or companies involved and the ` +
+    "main terms. Any order is fine, and I'll ask about anything that's missing."
   );
 }
 
@@ -54,9 +63,12 @@ export async function isChatAvailable(init?: ApiRequestInit): Promise<boolean> {
   }
 }
 
-/** Sends the conversation (ending with the user's message) and the current values; returns the AI's turn. */
+/**
+ * Sends the conversation (ending with the user's message) and the current values; returns the AI's
+ * turn. Without a template (home page) the AI works out which document the user needs.
+ */
 export function sendChat(
-  templateId: string,
+  templateId: string | null,
   messages: ChatMessage[],
   values: FieldValues,
   init?: ApiRequestInit,
@@ -65,7 +77,11 @@ export function sendChat(
     timeoutMs: CHAT_TIMEOUT_MS,
     ...init,
     method: "POST",
-    body: JSON.stringify({ template_id: templateId, messages: messages.slice(-MAX_SENT_MESSAGES), values }),
+    body: JSON.stringify({
+      ...(templateId ? { template_id: templateId } : {}),
+      messages: messages.slice(-MAX_SENT_MESSAGES),
+      values,
+    }),
   });
 }
 
@@ -94,11 +110,17 @@ export function chatFailure(error: unknown): ChatFailure {
 export interface StoredChat {
   messages: ChatMessage[];
   values: FieldValues;
+  /** The conversation started on the home page (it keeps the home greeting). */
+  fromHome?: boolean;
 }
 
+/** Storage target of the home page chat (template ids are kebab-case, so this can't clash). */
+export const HOME_CHAT = "_home";
+
 /** Scoped by user, so a different (fake) sign-in in the same tab doesn't see this conversation. */
-export const chatStorageKey = (userEmail: string, templateId: string) =>
-  `prelegal.chat.v1:${userEmail}:${templateId}`;
+export const chatStorageKey = (userEmail: string, target: string) => `prelegal.chat.v1:${userEmail}:${target}`;
+
+export const templatePath = (templateId: string) => `/templates/${templateId}/`;
 
 /** Parses a stored chat, keeping only well-formed messages and values for known fields. */
 export function parseStoredChat(raw: string | null, fieldKeys: readonly string[]): StoredChat | null {
@@ -106,7 +128,7 @@ export function parseStoredChat(raw: string | null, fieldKeys: readonly string[]
   try {
     const data: unknown = JSON.parse(raw);
     if (!data || typeof data !== "object") return null;
-    const { messages, values } = data as Record<string, unknown>;
+    const { messages, values, fromHome } = data as Record<string, unknown>;
     if (!Array.isArray(messages) || !values || typeof values !== "object") return null;
     const known = new Set(fieldKeys);
     return {
@@ -117,6 +139,7 @@ export function parseStoredChat(raw: string | null, fieldKeys: readonly string[]
       values: Object.fromEntries(
         Object.entries(values).filter(([k, v]) => known.has(k) && typeof v === "string"),
       ) as FieldValues,
+      fromHome: fromHome === true,
     };
   } catch {
     return null;
@@ -145,4 +168,31 @@ export function clearChat(key: string): void {
   } catch {
     // Nothing stored.
   }
+}
+
+// ---- Handoff: the AI chose (or switched to) a document, so its page continues the conversation ----
+
+export interface Handoff {
+  /** Where the conversation is saved for the document page to pick up. */
+  key: string;
+  chat: StoredChat;
+  href: string;
+}
+
+/**
+ * Plans opening `templateId`'s page with the conversation so far (including the AI's reply) and
+ * the values it already holds for that document. Overwrites any older chat for that document.
+ */
+export function planHandoff(
+  userEmail: string,
+  templateId: string,
+  conversation: ChatMessage[],
+  values: FieldValues,
+  fromHome = false,
+): Handoff {
+  return {
+    key: chatStorageKey(userEmail, templateId),
+    chat: { messages: conversation, values, fromHome },
+    href: templatePath(templateId),
+  };
 }

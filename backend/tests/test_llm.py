@@ -126,3 +126,29 @@ def test_logs_never_contain_the_key_or_conversation(caplog: pytest.LogCaptureFix
         client(completion).complete([{"role": "user", "content": "my secret address"}], Turn)
     assert "AuthenticationError" in caplog.text
     assert "sk-test" not in caplog.text and "secret address" not in caplog.text
+
+
+def test_per_call_timeout_overrides_the_default() -> None:
+    calls: list[dict] = []
+
+    def completion(**kwargs):
+        calls.append(kwargs)
+        return fake_response('{"reply": "hi"}')
+
+    llm = client(completion)
+    llm.complete([], Turn, timeout=7.5)
+    llm.complete([], Turn)
+    assert [c["timeout"] for c in calls] == [7.5, 20]
+
+
+def test_per_call_retries_override_the_default() -> None:
+    calls: list[dict] = []
+
+    def completion(**kwargs):
+        calls.append(kwargs)
+        return fake_response('{"reply": "hi"}')
+
+    llm = client(completion)
+    llm.complete([], Turn, max_retries=0)
+    llm.complete([], Turn)
+    assert [c["max_retries"] for c in calls] == [0, 1]
