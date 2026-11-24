@@ -3,7 +3,7 @@ A platform for drafting common legal agreements
 
 **🌐 Live site: <https://prelegal-blue.vercel.app>**
 
-PreLegal is a generic document creator: pick any template, fill in a form, watch the agreement update live as you type, and download the completed document as PDF or Markdown. The forms and documents come straight from the template dataset in [`data/templates`](data/templates), so adding a template to the catalog adds it to the site.
+PreLegal is a generic document creator: pick any template, fill it in, watch the agreement update live, and download the completed document as PDF or Markdown. The **Mutual NDA** is filled in by chatting with an AI drafting assistant (PL-7); the other templates use a form. The forms and documents come straight from the template dataset in [`data/templates`](data/templates), so adding a template to the catalog adds it to the site.
 
 > 🚧 **Status: In progress.** This project is under active development and is expected to be completed within 1 week (target: November 28, 2026).
 
@@ -62,15 +62,16 @@ The start script builds the image, (re)starts the `prelegal` container and waits
 
 - **Sign-in** is a placeholder for now (PL-6): enter any name and email, no password. Real accounts arrive with PL-9.
 - **The database is temporary**: SQLite inside the container, recreated from scratch every time the container starts.
-- A `.env` file in the repository root, if present, is passed to the container at run time (it is never copied into the image).
+- A `.env` file in the repository root, if present, is passed to the container at run time (it is never copied into the image). The AI chat needs `OPENAI_API_KEY` there; `OPENAI_MODEL` is optional (default `gpt-4.1-mini`). Without a key the app still runs, the chat reports it isn't configured and offers the form.
+- **AI chat (Mutual NDA)**: the backend calls OpenAI through LiteLLM with Structured Outputs; every value the AI extracts is validated on the server before it reaches the document. If the backend isn't reachable (e.g. the static Vercel site), the page falls back to the form. `/api/chat` has no authentication or rate limit yet (fake sign-in until PL-9), so anyone who can reach the server can spend OpenAI credits.
 
 ### Architecture
 
 ```
 Docker image
 ├── build stage (node:24)    frontend/ + data/  ──npm run build──▶  static export (out/)
-└── runtime (python:3.13)    FastAPI (backend/) on :8000
-                               ├── /api/*   JSON API, SQLite at /tmp/prelegal.db
+└── runtime (python:3.13)    FastAPI (backend/) on :8000, data/templates (chat prompt + schema)
+                               ├── /api/*   JSON API, SQLite at /tmp/prelegal.db, AI chat ──LiteLLM──▶ OpenAI
                                └── /*       the static export (404.html for unknown pages)
 ```
 
@@ -78,6 +79,7 @@ Docker image
 | --- | --- |
 | `GET /api/health` | Health check |
 | `POST /api/session` | Fake sign-in: records `{name, email}` in the `users` table and returns the user |
+| `POST /api/chat` | One AI chat turn (Mutual NDA only): `{template_id, messages, values}` → `{reply, values, complete}`. Errors return `{"detail": {"code", "message", "retryable"}}` |
 | `GET /api/docs` | Interactive API docs |
 
 ### Development
@@ -86,16 +88,31 @@ Docker image
 # Backend (http://localhost:8000): API only unless PRELEGAL_STATIC_DIR points at a frontend build
 cd backend
 uv sync
-uv run pytest                     # tests (includes serving frontend/out if it has been built)
+uv run pytest                     # tests, no network (includes serving frontend/out if it has been built)
 uv run ruff check . && uv run ruff format --check .
-PRELEGAL_STATIC_DIR=../frontend/out uv run uvicorn app.main:create_app --factory --reload
+PRELEGAL_STATIC_DIR=../frontend/out uv run --env-file ../.env uvicorn app.main:create_app --factory --reload
 
 # Frontend (see frontend/README.md)
 cd frontend
 npm install
-npm run dev                       # http://localhost:3000, sign-in is device-only without the backend
+npm run dev                       # http://localhost:3000, no backend: device-only sign-in, form instead of chat
 npm test && npm run lint && npm run build
 ```
+
+### Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | none | OpenAI key for the AI chat (root `.env`; read by LiteLLM, never logged or sent to the browser) |
+| `OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI model, called as `openai/<model>` |
+| `PRELEGAL_PORT` | `8000` | Host port used by the start scripts |
+| `PRELEGAL_DB_PATH` | `prelegal.db` (`/tmp/prelegal.db` in the image) | Temporary SQLite database |
+| `PRELEGAL_STATIC_DIR` | unset (`/app/static` in the image) | Frontend export served at `/`; unset serves the API only |
+| `PRELEGAL_TEMPLATES_DIR` | repo `data/templates` (`/app/data/templates` in the image) | Template catalog the chat builds its prompt and schema from |
+| `PRELEGAL_LLM_TIMEOUT_S` / `PRELEGAL_LLM_MAX_RETRIES` | `20` / `1` | Per-attempt timeout and retries for OpenAI calls |
+| `LITELLM_LOCAL_MODEL_COST_MAP` | `True` | Use LiteLLM's bundled model map instead of fetching it at startup |
+
+The Docker image is about 1.1 GB, mostly LiteLLM and its dependencies.
 
 ## Project structure
 
@@ -104,7 +121,7 @@ npm test && npm run lint && npm run build
 | [`backend`](backend) | FastAPI app (uv project): the API, the temporary SQLite database, and serving the frontend build |
 | [`docs/screenshots`](docs/screenshots) | Screenshots of the live site and a sample PDF |
 | [`data/templates`](data/templates) | Dataset of legal document templates and their field catalog |
-| [`frontend`](frontend) | Next.js app (static export): sign-in and the document creator for every catalog template. See [frontend/README.md](frontend/README.md) |
+| [`frontend`](frontend) | Next.js app (static export): sign-in, the AI chat for the Mutual NDA and the form-based creator for the other templates. See [frontend/README.md](frontend/README.md) |
 | [`scripts`](scripts) | Start/stop scripts for macOS, Linux and Windows, and `validate-templates.mjs` |
 | [`Dockerfile`](Dockerfile) | Multi-stage build of the whole app |
 

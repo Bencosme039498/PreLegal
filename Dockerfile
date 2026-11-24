@@ -20,12 +20,16 @@ WORKDIR /app
 COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
 RUN uv sync --frozen --no-dev
 COPY backend/app ./app
+# The AI chat builds its prompt and output schema from the template catalog.
+COPY data/templates ./data/templates
 COPY --from=frontend /build/frontend/out ./static
 
 # The database lives inside the container and is recreated on every start.
 ENV PATH="/app/.venv/bin:$PATH" \
     PRELEGAL_STATIC_DIR=/app/static \
-    PRELEGAL_DB_PATH=/tmp/prelegal.db
+    PRELEGAL_DB_PATH=/tmp/prelegal.db \
+    PRELEGAL_TEMPLATES_DIR=/app/data/templates \
+    LITELLM_LOCAL_MODEL_COST_MAP=True
 # Non-root user; the app only writes the database under /tmp, so /app stays root-owned.
 RUN useradd --system --no-create-home app
 USER app

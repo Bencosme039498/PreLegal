@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DocumentBuilder } from "@/components/DocumentBuilder";
+import { supportsChat } from "@/lib/chat";
 import { groupFields } from "@/lib/fill-template";
 import { listTemplates, loadTemplate } from "@/lib/templates";
 
@@ -18,6 +19,7 @@ export async function generateMetadata({ params }: PageProps<"/templates/[id]">)
 export default async function TemplatePage({ params }: PageProps<"/templates/[id]">) {
   const template = loadTemplate((await params).id);
   if (!template) notFound();
+  const chat = supportsChat(template.id);
 
   return (
     <>
@@ -27,12 +29,20 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[id
         </Link>
         <h1 className="mt-2 font-serif text-3xl font-semibold text-brand-navy">{template.name}</h1>
         <p className="mt-2 max-w-3xl text-stone-600">
-          {template.description} Fill in the details below and the document updates as you type. When every field is
-          complete, download it as a PDF or Markdown file.
+          {template.description}{" "}
+          {chat
+            ? "Chat with the drafting assistant and it fills in the document as you answer."
+            : "Fill in the details below and the document updates as you type."}{" "}
+          When every field is complete, download it as a PDF or Markdown file.
         </p>
       </header>
 
-      <DocumentBuilder name={template.name} body={template.body} sections={groupFields(template.fields)} />
+      <DocumentBuilder
+        name={template.name}
+        body={template.body}
+        sections={groupFields(template.fields)}
+        chatTemplateId={chat ? template.id : undefined}
+      />
     </>
   );
 }
