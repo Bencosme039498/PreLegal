@@ -28,3 +28,16 @@ class Settings(BaseSettings):
     # Total time for one chat request, which may make two LLM calls (choosing a document, then its
     # first turn). Stays below the frontend's 60 s timeout so the server's answer always arrives.
     chat_budget_s: float = Field(default=50.0, gt=0, lt=60)
+
+    # Accounts: how long a sign-in lasts, and whether the session cookie is HTTPS-only (set true
+    # when serving over HTTPS; the Docker scripts serve plain http://localhost).
+    session_ttl_s: float = Field(default=14 * 24 * 3600, gt=0)
+    cookie_secure: bool = False
+    # Rate limits (in memory, per process): AI chat turns per user, and failed sign-ins or sign-ups
+    # per email and per client address, each within a sliding window.
+    chat_rate_limit: int = Field(default=30, ge=1)
+    chat_rate_window_s: float = Field(default=60.0, gt=0)
+    auth_rate_limit: int = Field(default=10, ge=1)
+    auth_rate_window_s: float = Field(default=300.0, gt=0)
+    # Saved drafts per user.
+    max_documents_per_user: int = Field(default=200, ge=1)

@@ -7,7 +7,13 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.llm import LlmError
 from app.schemas import MAX_MESSAGE_CHARS, MAX_MESSAGES
-from tests.conftest import FakeLlm
+from tests.conftest import PASSWORD, FakeClock, FakeLlm, sign_up
+
+
+@pytest.fixture(autouse=True)
+def _signed_in(client: TestClient) -> None:
+    """/api/chat needs a signed-in user (see the tests at the end for the signed-out case)."""
+    sign_up(client)
 
 
 def chat_body(**overrides) -> dict:
@@ -127,3 +133,41 @@ def test_chat_budget_must_fit_the_frontend_timeout(budget_s: float) -> None:
     # The frontend aborts after 60 s; the server's budget must end first so its answer arrives.
     with pytest.raises(ValidationError):
         Settings(chat_budget_s=budget_s)
+
+
+# ---- Sign-in and rate limit ----
+
+
+def test_chat_needs_a_signed_in_user(client: TestClient, fake_llm: FakeLlm) -> None:
+    client.post("/api/auth/logout")
+    res = client.post("/api/chat", json=chat_body())
+    assert res.status_code == 401
+    assert res.json()["detail"]["code"] == "not_authenticated"
+    assert fake_llm.calls == []
+
+
+def test_chat_is_rate_limited_per_user(
+    client: TestClient, fake_llm: FakeLlm, settings: Settings, clock: FakeClock
+) -> None:
+    for _ in range(settings.chat_rate_limit):
+        assert client.post("/api/chat", json=chat_body()).status_code == 200
+    calls = len(fake_llm.calls)
+
+    res = client.post("/api/chat", json=chat_body())
+    assert res.status_code == 429
+    assert res.json()["detail"] == {
+        "code": "chat_rate_limited",
+        "message": res.json()["detail"]["message"],
+        "retryable": True,
+    }
+    assert int(res.headers["retry-after"]) >= 1
+    assert len(fake_llm.calls) == calls  # the AI isn't called
+
+    # Another user has their own allowance.
+    sign_up(client, email="other@example.com")
+    assert client.post("/api/chat", json=chat_body()).status_code == 200
+
+    # Once the window has passed, the first user may chat again.
+    clock.advance(settings.chat_rate_window_s)
+    client.post("/api/auth/login", json={"email": "jane@example.com", "password": PASSWORD})
+    assert client.post("/api/chat", json=chat_body()).status_code == 200

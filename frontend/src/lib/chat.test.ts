@@ -5,6 +5,7 @@ import {
   chatFailure,
   chatStorageKey,
   clearChat,
+  clearChats,
   MAX_SENT_MESSAGES,
   greeting,
   isChatAvailable,
@@ -188,5 +189,38 @@ describe("handoff", () => {
   it("round-trips fromHome through storage parsing", () => {
     expect(parseStoredChat(JSON.stringify({ messages: conversation, values: {}, fromHome: true }), [])?.fromHome).toBe(true);
     expect(parseStoredChat(JSON.stringify({ messages: [], values: {}, fromHome: "yes" }), [])?.fromHome).toBe(false);
+  });
+});
+
+describe("saved document link", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps a valid docId and drops a bad one", () => {
+    const base = { messages: [], values: {} };
+    expect(parseStoredChat(JSON.stringify({ ...base, docId: 4 }), [])).toEqual({ ...base, fromHome: false, docId: 4 });
+    for (const docId of [0, -1, 1.5, "4", null]) {
+      expect(parseStoredChat(JSON.stringify({ ...base, docId }), [])).toEqual({ ...base, fromHome: false });
+    }
+  });
+
+  it("clearChats forgets only that user's conversations", () => {
+    const store = new Map<string, string>();
+    const sessionStorage = {
+      get length() {
+        return store.size;
+      },
+      key: (i: number) => [...store.keys()][i] ?? null,
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    vi.stubGlobal("window", { sessionStorage });
+    const chat = { messages: [], values: {} };
+    saveChat(chatStorageKey("jane@example.com", "mutual-nda"), chat);
+    saveChat(chatStorageKey("jane@example.com", HOME_CHAT), chat);
+    saveChat(chatStorageKey("bob@example.com", "mutual-nda"), chat);
+    store.set("unrelated", "x");
+    clearChats("jane@example.com");
+    expect([...store.keys()].sort()).toEqual([chatStorageKey("bob@example.com", "mutual-nda"), "unrelated"].sort());
   });
 });

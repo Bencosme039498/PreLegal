@@ -6,9 +6,10 @@ It is built as a **static export** (`output: "export"` in `next.config.ts`): `np
 
 | Route | Page |
 | --- | --- |
-| `/login/` | Sign-in screen (fake sign-in: name + email, no password) |
-| `/` | The home chat ("What do you need to draft?", when a backend answers) and the list of all templates in `data/templates/catalog.json` (signed-in users) |
-| `/templates/<id>/` | Creator for one template, e.g. `/templates/mutual-nda/` (signed-in users) |
+| `/login/`, `/signup/` | Sign in / create an account (a labelled demo sign-in when no backend answers) |
+| `/` | Dashboard: the home chat ("What do you need to draft?", when a backend answers), recent documents and every template in `data/templates/catalog.json` (signed-in users) |
+| `/documents/` | My documents: every saved draft, to open or delete (signed-in users) |
+| `/templates/<id>/` | Creator for one template, e.g. `/templates/mutual-nda/`; `?doc=<id>` opens a saved document (signed-in users) |
 
 URLs end in `/` (`trailingSlash: true`), so each page is exported as `route/index.html`; paths without the slash redirect.
 
@@ -66,14 +67,15 @@ Every template page replaces the form with a freeform chat: the assistant asks a
 - The backend validates every AI-extracted value (dates `YYYY-MM-DD`, whole numbers, money with a digit, percentages as `5%`, select values mapped to their exact option, known fields only) and returns it unescaped; `fillTemplate` escapes it as usual. The download buttons stay gated by `incompleteFields`.
 - `src/lib/api-client.ts`: a response with a coded error (`{"detail": {"code", "message", "retryable"}}`) is an `ApiError` whatever its status. For example, a 504 when OpenAI timed out is not treated as "no backend".
 
-## Sign-in (PL-6)
+## Accounts and saved documents (PL-9)
 
-A placeholder for real authentication (PL-9): it identifies the user but checks no password.
-
-- App pages live in the `src/app/(app)/` route group, whose layout wraps them in `RequireSession`: visitors without a session are sent to `/login/`. The check runs in the browser (a static export has no server), and pages render only once the session is known, so signed-out visitors never see app content.
-- `LoginForm` validates the name and email (`validateLogin` in `src/lib/session.ts`) and calls `POST /api/session`, which records the user in the backend's temporary database. The user is then kept in `localStorage` (`useSession` reads it with `useSyncExternalStore`, in sync across tabs).
-- If no backend answers (`npm run dev`, or the static Vercel deployment), `src/lib/api-client.ts` reports the API as unavailable and the user is signed in on this device only, shown as "(this device only)" in the header.
-- **Sign out** clears the session and returns to `/login/`.
+- `AuthForm` (`/login/`, `/signup/`) validates the input like the backend does (`validateSignUp` / `validateSignIn` in `src/lib/session.ts`) and calls `POST /api/auth/signup` or `/api/auth/login`. The backend sets an HttpOnly session cookie, which JavaScript never sees; `localStorage` only caches who is signed in (`useSession` reads it with `useSyncExternalStore`, in sync across tabs).
+- App pages live in the `src/app/(app)/` route group, whose layout wraps them in `RequireSession` and the top bar (`AppNav`). Visitors without a session are sent to `/login/`. The check runs in the browser (a static export has no server), and pages render only once the session is known. `RequireSession` also checks the cached user against the cookie (`GET /api/auth/me`), and any `401 not_authenticated` (the session expired, or the server restarted with a fresh database) signs the user out of the tab (`setUnauthenticatedHandler` in `src/lib/api-client.ts`).
+- **Autosave**: `DocumentLoader` decides which draft a template page edits (`?doc=<id>`, or a new draft or AI handoff kept in sessionStorage), and `DocumentBuilder` saves it about a second after each change (`useDocumentAutosave`, built on the framework-free `src/lib/autosave.ts`: one save at a time, failed saves kept for Retry). The first save creates the document and puts `?doc=<id>` in the address. **New draft** starts a blank one; an AI document switch saves the current draft first.
+- **My documents** (`/documents/`, `DocumentsList`) lists the drafts with a Draft / Complete badge; the dashboard shows the five most recent.
+- **Disclaimer**: "Draft for legal review" (`src/lib/disclaimer.ts`) sits above the preview and is printed with the PDF, heads the Markdown download, and appears in the footer and on the sign-up page.
+- **Demo mode**: if no backend answers (`npm run dev`, or the static Vercel deployment) there are no accounts. The sign-in page offers a labelled demo sign-in (name + email, kept on this device); the form-based editor works, and nothing is saved.
+- **Sign out** ends the session on the backend, forgets the tab's conversations and returns to `/login/`.
 
 ## Colors
 

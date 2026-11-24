@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, ApiUnavailableError, apiRequest, isErrorEnvelope } from "./api-client";
+import { ApiError, ApiUnavailableError, apiRequest, isErrorEnvelope, setUnauthenticatedHandler } from "./api-client";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -18,7 +18,7 @@ describe("apiRequest", () => {
 
   it("raises ApiError with the detail for a JSON 4xx such as 422", async () => {
     const fetchImpl = fetchReturning(json(422, { detail: [{ loc: ["body", "email"] }] }));
-    const error = await apiRequest("/api/session", { fetchImpl }).catch((e: unknown) => e);
+    const error = await apiRequest("/api/documents", { fetchImpl }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).status).toBe(422);
     expect((error as ApiError).detail).toEqual([{ loc: ["body", "email"] }]);
@@ -36,7 +36,7 @@ describe("apiRequest", () => {
       () => fetchReturning(new Response("{not json", { status: 200, headers: { "Content-Type": "application/json" } })),
     ],
   ])("raises ApiUnavailableError for %s", async (_, makeFetch) => {
-    await expect(apiRequest("/api/session", { fetchImpl: makeFetch() })).rejects.toBeInstanceOf(ApiUnavailableError);
+    await expect(apiRequest("/api/documents", { fetchImpl: makeFetch() })).rejects.toBeInstanceOf(ApiUnavailableError);
   });
 
   it("raises ApiUnavailableError when the request times out", async () => {
@@ -44,7 +44,7 @@ describe("apiRequest", () => {
       (_, init) =>
         new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))),
     );
-    await expect(apiRequest("/api/session", { fetchImpl, timeoutMs: 10 })).rejects.toBeInstanceOf(ApiUnavailableError);
+    await expect(apiRequest("/api/documents", { fetchImpl, timeoutMs: 10 })).rejects.toBeInstanceOf(ApiUnavailableError);
   });
 
   it.each([404, 429, 502, 503, 504])("raises ApiError for a coded error envelope with status %i", async (status) => {
@@ -103,5 +103,38 @@ describe("isErrorEnvelope", () => {
     [[{ loc: ["body"] }], false],
   ])("%j -> %s", (detail, expected) => {
     expect(isErrorEnvelope(detail)).toBe(expected);
+  });
+});
+
+describe("apiRequest and accounts", () => {
+  const envelope = (code: string) => ({ detail: { code, message: "m", retryable: false } });
+
+  it("returns nothing for 204 No Content", async () => {
+    await expect(apiRequest("/api/auth/logout", { fetchImpl: fetchReturning(new Response(null, { status: 204 })) })).resolves.toBeUndefined();
+  });
+
+  it("tells the unauthenticated handler when the session has ended, not for a wrong password", async () => {
+    const handler = vi.fn();
+    const unsubscribe = setUnauthenticatedHandler(handler);
+    await expect(apiRequest("/api/chat", { fetchImpl: fetchReturning(json(401, envelope("not_authenticated"))) })).rejects.toBeInstanceOf(ApiError);
+    expect(handler).toHaveBeenCalledTimes(1);
+    await expect(apiRequest("/api/auth/login", { fetchImpl: fetchReturning(json(401, envelope("invalid_credentials"))) })).rejects.toBeInstanceOf(ApiError);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    await apiRequest("/api/chat", { fetchImpl: fetchReturning(json(401, envelope("not_authenticated"))) }).catch(() => {});
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("an older unsubscribe doesn't remove a newer handler", async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const unsubscribeFirst = setUnauthenticatedHandler(first);
+    const unsubscribeSecond = setUnauthenticatedHandler(second);
+    unsubscribeFirst();
+    await apiRequest("/api/chat", { fetchImpl: fetchReturning(json(401, envelope("not_authenticated"))) }).catch(() => {});
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+    unsubscribeSecond();
   });
 });

@@ -112,12 +112,14 @@ export interface StoredChat {
   values: FieldValues;
   /** The conversation started on the home page (it keeps the home greeting). */
   fromHome?: boolean;
+  /** The saved document this draft autosaves to (signed-in users), once it has been created. */
+  docId?: number;
 }
 
 /** Storage target of the home page chat (template ids are kebab-case, so this can't clash). */
 export const HOME_CHAT = "_home";
 
-/** Scoped by user, so a different (fake) sign-in in the same tab doesn't see this conversation. */
+/** Scoped by user, so another account signed in later in the same tab doesn't see this conversation. */
 export const chatStorageKey = (userEmail: string, target: string) => `prelegal.chat.v1:${userEmail}:${target}`;
 
 export const templatePath = (templateId: string) => `/templates/${templateId}/`;
@@ -128,7 +130,7 @@ export function parseStoredChat(raw: string | null, fieldKeys: readonly string[]
   try {
     const data: unknown = JSON.parse(raw);
     if (!data || typeof data !== "object") return null;
-    const { messages, values, fromHome } = data as Record<string, unknown>;
+    const { messages, values, fromHome, docId } = data as Record<string, unknown>;
     if (!Array.isArray(messages) || !values || typeof values !== "object") return null;
     const known = new Set(fieldKeys);
     return {
@@ -140,6 +142,7 @@ export function parseStoredChat(raw: string | null, fieldKeys: readonly string[]
         Object.entries(values).filter(([k, v]) => known.has(k) && typeof v === "string"),
       ) as FieldValues,
       fromHome: fromHome === true,
+      ...(typeof docId === "number" && Number.isSafeInteger(docId) && docId > 0 ? { docId } : {}),
     };
   } catch {
     return null;
@@ -165,6 +168,18 @@ export function saveChat(key: string, chat: StoredChat): void {
 export function clearChat(key: string): void {
   try {
     window.sessionStorage.removeItem(key);
+  } catch {
+    // Nothing stored.
+  }
+}
+
+/** Forgets every conversation of this user in this tab (on sign-out). */
+export function clearChats(userEmail: string): void {
+  try {
+    const prefix = chatStorageKey(userEmail, "");
+    const storage = window.sessionStorage;
+    const keys = Array.from({ length: storage.length }, (_, i) => storage.key(i));
+    for (const key of keys) if (key?.startsWith(prefix)) storage.removeItem(key);
   } catch {
     // Nothing stored.
   }
