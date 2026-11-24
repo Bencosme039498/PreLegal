@@ -1,13 +1,13 @@
 # PreLegal frontend
 
-Next.js app for PreLegal: a **document creator for every template in the catalog** (PL-3, PL-4). The user picks a template, fills it in, sees a live preview of the agreement with their details filled in, and downloads the completed document as **PDF** or **Markdown**. The Mutual NDA is filled in through a chat with an **AI drafting assistant** (PL-7); the other templates use a form.
+Next.js app for PreLegal: a **document creator for every template in the catalog** (PL-3, PL-4). The user picks a template, fills it in, sees a live preview of the agreement with their details filled in, and downloads the completed document as **PDF** or **Markdown**. Every template is filled in through a chat with an **AI drafting assistant** (PL-7, PL-8), which can also pick the document from the home page; the form is the fallback.
 
 It is built as a **static export** (`output: "export"` in `next.config.ts`): `npm run build` writes plain HTML/JS to `out/`, which the FastAPI backend serves at <http://localhost:8000> (PL-6) and Vercel hosts as a static site.
 
 | Route | Page |
 | --- | --- |
 | `/login/` | Sign-in screen (fake sign-in: name + email, no password) |
-| `/` | List of all templates in `data/templates/catalog.json` (signed-in users) |
+| `/` | The home chat ("What do you need to draft?", when a backend answers) and the list of all templates in `data/templates/catalog.json` (signed-in users) |
 | `/templates/<id>/` | Creator for one template, e.g. `/templates/mutual-nda/` (signed-in users) |
 
 URLs end in `/` (`trailingSlash: true`), so each page is exported as `route/index.html`; paths without the slash redirect.
@@ -22,7 +22,7 @@ npm install
 npm run dev     # http://localhost:3000
 ```
 
-Without the backend, sign-in still works but is kept on this device only, and the Mutual NDA shows the form instead of the AI chat (see below).
+Without the backend, sign-in still works but is kept on this device only, the home page shows only the list of templates, and every template shows the form instead of the AI chat (see below).
 
 | Script | Purpose |
 | --- | --- |
@@ -40,28 +40,30 @@ Without the backend, sign-in still works but is kept on this device only, and th
   - `textarea` values (scope, deliverables, schedules) keep their line breaks; other multi-line values (addresses) are joined with commas;
   - dates are formatted as e.g. "November 23, 2026"; integer fields must be whole numbers ≥ 0;
   - blank or invalid fields render as highlighted labels in the preview.
-- **UI** (`src/components/DocumentBuilder.tsx`) owns the field values, picks the editor (`ChatPanel` for the AI chat, `FormEditor` for the form) and re-renders the preview with `react-markdown` + `remark-gfm` + `remark-breaks` (so line-by-line blocks like addresses and signature lines render as written).
+- **UI** (`src/components/DocumentBuilder.tsx`) owns the field values, picks the editor (`ChatPanel` for the AI chat, `FormEditor` for the form), hands the conversation over when the AI switches documents, and re-renders the preview with `react-markdown` + `remark-gfm` + `remark-breaks` (so line-by-line blocks like addresses and signature lines render as written).
 - **Downloads** are enabled once every field is complete and valid:
   - *Markdown*: the filled document as a `.md` file.
   - *PDF*: opens the browser's print dialog with print styles that show only the document; choose **Save as PDF**. The suggested file name is e.g. `Mutual-Non-Disclosure-Agreement_Acme-Inc_Globex-LLC`.
 
-## AI chat (PL-7)
+## AI chat (PL-7, PL-8)
 
-The Mutual NDA page replaces the form with a freeform chat: the assistant asks about the agreement, the user answers in their own words, and the preview fills in as the AI extracts the field values. All AI calls go through the backend (`POST /api/chat`, see the [root README](../README.md)); no key or model call ever happens in the browser.
+Every template page replaces the form with a freeform chat: the assistant asks about the agreement, the user answers in their own words, and the preview fills in as the AI extracts the field values. The home page has a chat too, where the assistant works out which document the user needs. All AI calls go through the backend (`POST /api/chat`, see the [root README](../README.md)); no key or model call ever happens in the browser.
 
+- **Choosing and switching documents.** A chat response carries the `template_id` the conversation is now about. When it differs from the current page's (the home chat picked a document, or the user confirmed a switch on a document page), `ChatPanel` calls `onNavigate`. The caller saves the conversation (ending with the AI's reply) and the values for the new document with `planHandoff`, then `router.push`es to `/templates/<id>/`. The template page keys `DocumentBuilder` by id, so the new page starts from that saved state.
 - `src/lib/chat.ts`: the chat client.
-  - `sendChat` posts `{template_id, messages, values}` with a 60 s timeout and sends the latest 30 messages.
-  - `isChatAvailable` probes `/api/health`.
+  - `sendChat` posts `{template_id?, messages, values}` and sends the latest `MAX_SENT_MESSAGES` (30). The home chat omits `template_id`. Its 60 s timeout sits above the backend's per-request budget (`PRELEGAL_CHAT_BUDGET_S`, 50 s), so the server's answer or error always arrives first.
+  - `isChatAvailable` probes `/api/health` (used by `useChatAvailability`).
   - `chatFailure` turns errors into user-facing messages.
-  - The conversation and field values persist in `sessionStorage`, per user and template, so they survive a reload and are cleared when the tab closes.
-  - `CHAT_TEMPLATE_IDS` lists the templates that get the chat (only `mutual-nda` for now).
+  - `greeting(name?)` is the opening message: for a document, or (no name) for the home chat.
+  - The conversation and field values persist in `sessionStorage`, per user and template (the home chat uses the `HOME_CHAT` target), so they survive a reload and are cleared when the tab closes. `fromHome` marks a conversation that started on the home page, which keeps the home greeting.
+- `src/components/HomeChat.tsx`: the home page chat. It renders nothing without a backend. When the AI picks a document it hands the conversation over and clears the home chat.
 - `src/components/ChatPanel.tsx`: the chat UI.
   - Enter sends and Shift+Enter starts a new line.
   - **Start over** clears the chat and the document.
   - **Retry** appears for retryable errors, and for a message left unanswered by a reload.
-  - **Use the form instead** appears for errors that a retry won't fix, such as no API key configured.
-- `DocumentBuilder` checks `/api/health` once. If no backend answers (the Vercel deployment, `npm run dev`), it shows a notice and the form. A failure later in the conversation shows as an error in the chat; it does not switch to the form.
-- The backend validates every AI-extracted value (dates `YYYY-MM-DD`, whole numbers, known fields only) and returns it unescaped; `fillTemplate` escapes it as usual. The download buttons stay gated by `incompleteFields`.
+  - **Use the form instead** appears for errors that a retry won't fix, such as no API key configured. On the home page, which has no form, it points to the list of documents instead.
+- `DocumentBuilder` checks `/api/health` once (`useChatAvailability`). If no backend answers (the Vercel deployment, `npm run dev`), it shows a notice and the form. A failure later in the conversation shows as an error in the chat; it does not switch to the form.
+- The backend validates every AI-extracted value (dates `YYYY-MM-DD`, whole numbers, money with a digit, percentages as `5%`, select values mapped to their exact option, known fields only) and returns it unescaped; `fillTemplate` escapes it as usual. The download buttons stay gated by `incompleteFields`.
 - `src/lib/api-client.ts`: a response with a coded error (`{"detail": {"code", "message", "retryable"}}`) is an `ApiError` whatever its status. For example, a 504 when OpenAI timed out is not treated as "no backend".
 
 ## Sign-in (PL-6)
