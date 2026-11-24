@@ -1,10 +1,11 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { chatStorageKey, clearChat, isChatAvailable, loadChat, saveChat, type ChatMessage } from "@/lib/chat";
+import { chatStorageKey, clearChat, greeting, loadChat, planHandoff, saveChat, type ChatMessage } from "@/lib/chat";
 import {
   documentFilename,
   fillTemplate,
@@ -16,6 +17,7 @@ import {
 import { ChatPanel } from "./ChatPanel";
 import { FormEditor } from "./FormEditor";
 import { useSession } from "./session/useSession";
+import { useChatAvailability } from "./useChatAvailability";
 
 interface DocumentBuilderProps {
   /** Document name, used as the start of downloaded file names. */
@@ -24,12 +26,9 @@ interface DocumentBuilderProps {
   body: string;
   /** The template's fields grouped into form sections (see groupFields). */
   sections: FieldSection[];
-  /** Set when the AI assistant supports this template: the chat replaces the form. */
-  chatTemplateId?: string;
+  /** The template's id: the AI chat about this document (the form is the fallback). */
+  templateId: string;
 }
-
-/** Whether the AI assistant's backend answers here ("checking" until the health probe returns). */
-type ChatAvailability = "checking" | "available" | "unavailable";
 
 const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
@@ -37,36 +36,29 @@ const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
  * AI chat (or form) + live preview of a filled-in template, with Markdown and PDF downloads.
  *
  * Only rendered for a signed-in user (RequireSession), so never during prerendering: the lazy state
- * initialisers may read sessionStorage.
+ * initialisers may read sessionStorage. The page keys it by template id, so switching documents
+ * mounts a fresh instance.
  */
-export function DocumentBuilder({ name, body, sections, chatTemplateId }: DocumentBuilderProps) {
+export function DocumentBuilder({ name, body, sections, templateId }: DocumentBuilderProps) {
   const fields = useMemo(() => sections.flatMap((s) => s.fields), [sections]);
   const { user } = useSession();
-  const storageKey = chatTemplateId && user ? chatStorageKey(user.email, chatTemplateId) : null;
+  const router = useRouter();
+  const storageKey = user ? chatStorageKey(user.email, templateId) : null;
   const [saved] = useState(() => (storageKey ? loadChat(storageKey, fields.map((f) => f.key)) : null));
   const [values, setValues] = useState<FieldValues>(() => ({ ...initialValues(fields), ...saved?.values }));
   const [messages, setMessages] = useState<ChatMessage[]>(() => saved?.messages ?? []);
-  const [availability, setAvailability] = useState<ChatAvailability>(chatTemplateId ? "checking" : "unavailable");
+  /** The conversation started on the home page (it keeps the home greeting). */
+  const fromHome = saved?.fromHome ?? false;
+  // The assistant needs the backend: on a static-only host (Vercel, next dev) fall back to the form.
+  const availability = useChatAvailability();
   /** The user chose to fill in the form by hand instead of chatting. */
   const [manual, setManual] = useState(false);
   const editor = availability === "checking" ? "checking" : availability === "available" && !manual ? "chat" : "form";
 
-  // The assistant needs the backend: on a static-only host (Vercel, next dev) fall back to the form.
-  useEffect(() => {
-    if (!chatTemplateId) return;
-    let active = true;
-    void isChatAvailable().then((available) => {
-      if (active) setAvailability(available ? "available" : "unavailable");
-    });
-    return () => {
-      active = false;
-    };
-  }, [chatTemplateId]);
-
   // Keep the conversation and the document for this tab (sessionStorage is cleared when it closes).
   useEffect(() => {
-    if (storageKey) saveChat(storageKey, { messages, values });
-  }, [storageKey, messages, values]);
+    if (storageKey) saveChat(storageKey, { messages, values, fromHome });
+  }, [storageKey, messages, values, fromHome]);
 
   const markdown = useMemo(() => fillTemplate(body, fields, values), [body, fields, values]);
   const incomplete = incompleteFields(fields, values);
@@ -81,6 +73,16 @@ export function DocumentBuilder({ name, body, sections, chatTemplateId }: Docume
     if (storageKey) clearChat(storageKey);
     setMessages([]);
     setValues(initialValues(fields));
+  };
+
+  // The AI switched to another document: its page picks up the conversation and carried values.
+  const openDocument = (nextId: string, conversation: ChatMessage[], carried: FieldValues) => {
+    if (!user || !storageKey) return;
+    // This document's chat keeps the AI's answer too, so coming back doesn't offer to resend the switch.
+    saveChat(storageKey, { messages: conversation, values, fromHome });
+    const handoff = planHandoff(user.email, nextId, conversation, carried, fromHome);
+    saveChat(handoff.key, handoff.chat);
+    router.push(handoff.href);
   };
 
   const downloadMarkdown = () => {
@@ -107,38 +109,37 @@ export function DocumentBuilder({ name, body, sections, chatTemplateId }: Docume
             Connecting to the drafting assistant…
           </p>
         )}
-        {editor === "chat" && chatTemplateId && (
+        {editor === "chat" && (
           <ChatPanel
-            templateId={chatTemplateId}
-            documentName={name}
+            templateId={templateId}
+            greetingText={fromHome ? greeting() : greeting(name)}
             messages={messages}
             onMessages={setMessages}
             values={values}
             onValues={(updated) => setValues((prev) => ({ ...prev, ...updated }))}
             onReset={startOver}
+            onNavigate={openDocument}
             onUseForm={() => setManual(true)}
           />
         )}
         {editor === "form" && (
           <>
-            {chatTemplateId && (
-              <p className="mb-4 rounded-lg border border-brand-yellow/60 bg-brand-yellow/10 px-4 py-3 text-sm text-stone-700">
-                {availability === "available" ? (
-                  <>
-                    You&apos;re filling in the form by hand.{" "}
-                    <button
-                      type="button"
-                      onClick={() => setManual(false)}
-                      className="font-medium text-brand-blue underline hover:text-brand-blue/80"
-                    >
-                      Back to the assistant
-                    </button>
-                  </>
-                ) : (
-                  "The AI drafting assistant isn't available here, so fill in the form instead."
-                )}
-              </p>
-            )}
+            <p className="mb-4 rounded-lg border border-brand-yellow/60 bg-brand-yellow/10 px-4 py-3 text-sm text-stone-700">
+              {availability === "available" ? (
+                <>
+                  You&apos;re filling in the form by hand.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setManual(false)}
+                    className="font-medium text-brand-blue underline hover:text-brand-blue/80"
+                  >
+                    Back to the assistant
+                  </button>
+                </>
+              ) : (
+                "The AI drafting assistant isn't available here, so fill in the form instead."
+              )}
+            </p>
             <FormEditor sections={sections} values={values} onChange={setValue} />
           </>
         )}

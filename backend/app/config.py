@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/app/config.py -> repository root -> data/templates (local runs and tests).
@@ -21,6 +22,9 @@ class Settings(BaseSettings):
     static_dir: Path | None = None
     # Template dataset (catalog.json): the AI chat builds its prompt and output schema from it.
     templates_dir: Path = _REPO_TEMPLATES_DIR
-    # LLM calls: per-attempt timeout (seconds) and retries done by the OpenAI client.
-    llm_timeout_s: float = 20.0
-    llm_max_retries: int = 1
+    # LLM calls: per-attempt timeout (seconds) and retries after a failed attempt.
+    llm_timeout_s: float = Field(default=20.0, gt=0)
+    llm_max_retries: int = Field(default=1, ge=0)
+    # Total time for one chat request, which may make two LLM calls (choosing a document, then its
+    # first turn). Stays below the frontend's 60 s timeout so the server's answer always arrives.
+    chat_budget_s: float = Field(default=50.0, gt=0, lt=60)

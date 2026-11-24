@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, ApiUnavailableError } from "./api-client";
 import {
+  HOME_CHAT,
   chatFailure,
   chatStorageKey,
   clearChat,
+  MAX_SENT_MESSAGES,
+  greeting,
   isChatAvailable,
   loadChat,
   parseStoredChat,
+  planHandoff,
   saveChat,
   sendChat,
-  supportsChat,
+  templatePath,
   type ChatMessage,
 } from "./chat";
 
@@ -20,16 +24,16 @@ const fetchReturning = (res: Response) => vi.fn<typeof fetch>().mockResolvedValu
 
 const user = (content: string): ChatMessage => ({ role: "user", content });
 
-describe("supportsChat", () => {
-  it("is only the Mutual NDA for now", () => {
-    expect(supportsChat("mutual-nda")).toBe(true);
-    expect(supportsChat("unilateral-nda")).toBe(false);
+describe("greeting", () => {
+  it("names the document, or asks what the user needs on the home page", () => {
+    expect(greeting("Promissory Note")).toContain("draft a Promissory Note");
+    expect(greeting()).toContain("What do you need to draft?");
   });
 });
 
 describe("sendChat", () => {
   it("posts the template, conversation and values and returns the turn", async () => {
-    const result = { reply: "Who is Party B?", values: { party_a_name: "Acme" }, complete: false };
+    const result = { reply: "Who is Party B?", template_id: "mutual-nda", values: { party_a_name: "Acme" }, complete: false };
     const fetchImpl = fetchReturning(json(200, result));
     await expect(sendChat("mutual-nda", [user("Acme")], { term_years: "2" }, { fetchImpl })).resolves.toEqual(result);
     const [path, init] = fetchImpl.mock.calls[0];
@@ -42,9 +46,19 @@ describe("sendChat", () => {
     });
   });
 
-  it("sends only the latest 30 messages", async () => {
+  it("omits the template on the home page, so the AI chooses the document", async () => {
+    const result = { reply: "Which kind of NDA?", template_id: null, values: {}, complete: false };
+    const fetchImpl = fetchReturning(json(200, result));
+    await expect(sendChat(null, [user("I need an NDA")], {}, { fetchImpl })).resolves.toEqual(result);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1]?.body as string)).toEqual({
+      messages: [{ role: "user", content: "I need an NDA" }],
+      values: {},
+    });
+  });
+
+  it("sends only the latest messages", async () => {
     const fetchImpl = fetchReturning(json(200, { reply: "", values: {}, complete: false }));
-    const messages = Array.from({ length: 35 }, (_, i) => user(`m${i}`));
+    const messages = Array.from({ length: MAX_SENT_MESSAGES + 5 }, (_, i) => user(`m${i}`));
     await sendChat("mutual-nda", messages, {}, { fetchImpl });
     const sent = JSON.parse(fetchImpl.mock.calls[0][1]?.body as string).messages as ChatMessage[];
     expect(sent.map((m) => m.content)).toEqual(messages.slice(5).map((m) => m.content));
@@ -99,7 +113,7 @@ describe("parseStoredChat", () => {
 
   it("round-trips messages and values", () => {
     const chat = { messages: [user("hi"), { role: "assistant" as const, content: "hello" }], values: { party_a_name: "Acme" } };
-    expect(parseStoredChat(JSON.stringify(chat), keys)).toEqual(chat);
+    expect(parseStoredChat(JSON.stringify(chat), keys)).toEqual({ ...chat, fromHome: false });
   });
 
   it("drops malformed messages and unknown or non-string values", () => {
@@ -107,7 +121,7 @@ describe("parseStoredChat", () => {
       messages: [user("ok"), { role: "system", content: "x" }, { role: "user" }, null, "text"],
       values: { party_a_name: "Acme", term_years: 2, injected: "x" },
     });
-    expect(parseStoredChat(raw, keys)).toEqual({ messages: [user("ok")], values: { party_a_name: "Acme" } });
+    expect(parseStoredChat(raw, keys)).toEqual({ messages: [user("ok")], values: { party_a_name: "Acme" }, fromHome: false });
   });
 
   it.each([null, "", "not json", "null", "[]", '{"messages":"x","values":{}}', '{"messages":[]}'])(
@@ -134,7 +148,7 @@ describe("chat storage", () => {
     expect(key).not.toBe(chatStorageKey("bob@example.com", "mutual-nda"));
 
     saveChat(key, { messages: [user("hi")], values: { party_a_name: "Acme" } });
-    expect(loadChat(key, ["party_a_name"])).toEqual({ messages: [user("hi")], values: { party_a_name: "Acme" } });
+    expect(loadChat(key, ["party_a_name"])).toEqual({ messages: [user("hi")], values: { party_a_name: "Acme" }, fromHome: false });
     clearChat(key);
     expect(loadChat(key, ["party_a_name"])).toBeNull();
   });
@@ -147,5 +161,32 @@ describe("chat storage", () => {
     expect(loadChat("k", [])).toBeNull();
     expect(() => saveChat("k", { messages: [], values: {} })).not.toThrow();
     expect(() => clearChat("k")).not.toThrow();
+  });
+});
+
+describe("handoff", () => {
+  const conversation: ChatMessage[] = [user("I need a loan agreement"), { role: "assistant", content: "A Promissory Note it is." }];
+
+  it("saves the conversation and values for the chosen document and links to its page", () => {
+    expect(planHandoff("jane@example.com", "promissory-note", conversation, { principal_amount: "$5,000" }, true)).toEqual({
+      key: chatStorageKey("jane@example.com", "promissory-note"),
+      chat: { messages: conversation, values: { principal_amount: "$5,000" }, fromHome: true },
+      href: templatePath("promissory-note"),
+    });
+    expect(templatePath("promissory-note")).toBe("/templates/promissory-note/");
+  });
+
+  it("is not from home when switching between documents", () => {
+    expect(planHandoff("jane@example.com", "unilateral-nda", conversation, {}).chat.fromHome).toBe(false);
+  });
+
+  it("keeps the home chat apart from every document", () => {
+    const home = chatStorageKey("jane@example.com", HOME_CHAT);
+    expect(home).not.toBe(chatStorageKey("jane@example.com", "mutual-nda"));
+  });
+
+  it("round-trips fromHome through storage parsing", () => {
+    expect(parseStoredChat(JSON.stringify({ messages: conversation, values: {}, fromHome: true }), [])?.fromHome).toBe(true);
+    expect(parseStoredChat(JSON.stringify({ messages: [], values: {}, fromHome: "yes" }), [])?.fromHome).toBe(false);
   });
 });

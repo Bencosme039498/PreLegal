@@ -42,7 +42,12 @@ class LlmError(Exception):
         self.retryable = retryable
 
     def detail(self) -> dict[str, Any]:
-        return {"code": self.code, "message": self.message, "retryable": self.retryable}
+        return error_detail(self.code, self.message, retryable=self.retryable)
+
+
+def error_detail(code: str, message: str, *, retryable: bool) -> dict[str, Any]:
+    """The coded error envelope the frontend understands: {"code", "message", "retryable"}."""
+    return {"code": code, "message": message, "retryable": retryable}
 
 
 def _not_configured() -> LlmError:
@@ -80,7 +85,16 @@ def translate_error(exc: Exception) -> LlmError:
 
 
 class StructuredLlm(Protocol):
-    def complete(self, messages: list[dict[str, str]], response_model: type[T]) -> T: ...
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        response_model: type[T],
+        *,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+    ) -> T:
+        """`timeout` (seconds, per attempt) and `max_retries` override the client's defaults."""
+        ...
 
 
 class LiteLlmClient:
@@ -93,7 +107,14 @@ class LiteLlmClient:
         self._max_retries = max_retries
         self._completion = completion_fn
 
-    def complete(self, messages: list[dict[str, str]], response_model: type[T]) -> T:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        response_model: type[T],
+        *,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+    ) -> T:
         if not os.getenv("OPENAI_API_KEY"):
             raise _not_configured()
         try:
@@ -101,10 +122,10 @@ class LiteLlmClient:
                 model=model_name(),
                 messages=messages,
                 response_format=response_model,
-                timeout=self._timeout,
+                timeout=self._timeout if timeout is None else timeout,
                 # Retries happen in the OpenAI client (backoff included); LiteLLM's num_retries is
                 # left unset so the two layers don't multiply.
-                max_retries=self._max_retries,
+                max_retries=self._max_retries if max_retries is None else max_retries,
                 temperature=0.2,
             )
         except Exception as exc:

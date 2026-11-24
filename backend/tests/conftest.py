@@ -1,5 +1,5 @@
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -22,22 +22,57 @@ FAKE_EXPORT = {
 
 
 class FakeLlm:
-    """Stands in for LiteLlmClient: returns a scripted turn (or raises) and records each call."""
+    """Stands in for LiteLlmClient: returns scripted turns (or raises) and records each call.
+
+    Drafting turns (response models with `updates`) use reply/updates/switch_to; selection turns
+    use selection_reply/template_id. `error` fails every call; `errors` fails given calls (1-based).
+    `on_call` runs before each call (e.g. to advance a fake clock).
+    """
 
     def __init__(self) -> None:
         self.reply = "Thanks! Who is the other party?"
         self.updates: dict[str, Any] = {}
+        self.switch_to: str | None = None
+        self.selection_reply = "Which document do you need?"
+        self.template_id: str | None = None
         self.error: LlmError | None = None
+        self.errors: dict[int, LlmError] = {}
+        self.on_call: Callable[[], None] | None = None
         self.calls: list[list[dict[str, str]]] = []
+        self.models: list[str] = []
+        self.timeouts: list[float | None] = []
+        self.max_retries: list[int | None] = []
 
-    def complete(self, messages: list[dict[str, str]], response_model: type[BaseModel]) -> BaseModel:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+        *,
+        timeout: float | None = None,
+        max_retries: int | None = None,
+    ) -> BaseModel:
+        if self.on_call:
+            self.on_call()
         self.calls.append(messages)
-        if self.error:
-            raise self.error
-        # Every slot is required by the strict schema, so fill the unspecified ones with null.
-        slots = response_model.model_fields["updates"].annotation.model_fields
-        updates = {key: self.updates.get(key) for key in slots}
-        return response_model.model_validate_json(json.dumps({"reply": self.reply, "updates": updates}))
+        self.models.append(response_model.__name__)
+        self.timeouts.append(timeout)
+        self.max_retries.append(max_retries)
+        error = self.errors.get(len(self.calls), self.error)
+        if error:
+            raise error
+        fields = response_model.model_fields
+        if "updates" in fields:
+            # Every slot is required by the strict schema, so fill the unspecified ones with null.
+            slots = fields["updates"].annotation.model_fields
+            payload: dict[str, Any] = {
+                "reply": self.reply,
+                "updates": {k: self.updates.get(k) for k in slots},
+            }
+            if "switch_to" in fields:
+                payload["switch_to"] = self.switch_to
+        else:
+            payload = {"reply": self.selection_reply, "template_id": self.template_id}
+        return response_model.model_validate_json(json.dumps(payload))
 
 
 @pytest.fixture

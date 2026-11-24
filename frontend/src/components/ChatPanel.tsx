@@ -1,27 +1,42 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MAX_MESSAGE_CHARS, chatFailure, greeting, sendChat, type ChatFailure, type ChatMessage } from "@/lib/chat";
+import { MAX_MESSAGE_CHARS, chatFailure, sendChat, type ChatFailure, type ChatMessage } from "@/lib/chat";
 import type { FieldValues } from "@/lib/fill-template";
 import { inputClass } from "./input-styles";
 
 interface ChatPanelProps {
-  templateId: string;
-  documentName: string;
+  /** The document being drafted, or null while the AI finds out which one the user needs. */
+  templateId: string | null;
+  /** The assistant's opening message (shown, never sent). */
+  greetingText: string;
   messages: ChatMessage[];
   onMessages: (messages: ChatMessage[]) => void;
-  values: FieldValues;
+  /** The document's current values (none on the home page, before a document is chosen). */
+  values?: FieldValues;
   /** Receives the field values after each AI turn (merged over the current ones by the caller). */
-  onValues: (values: FieldValues) => void;
+  onValues?: (values: FieldValues) => void;
   onReset: () => void;
-  onUseForm: () => void;
+  /**
+   * The AI chose a document, or switched to another: open it with this conversation (ending with
+   * the AI's reply) and the values it holds for that document.
+   */
+  onNavigate: (templateId: string, conversation: ChatMessage[], values: FieldValues) => void;
+  /** Offered when the chat can't continue (e.g. the AI isn't configured). */
+  onUseForm?: () => void;
+  /** Shown instead of "Use the form instead" when there is no form to use (the home page). */
+  noFormHint?: string;
+  /** Height classes for the panel. */
+  className?: string;
 }
 
 const bubble = "max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap";
+const NO_VALUES: FieldValues = {};
 
 /** Freeform chat with the AI assistant, which fills in the document's fields as the user answers. */
 export function ChatPanel(props: ChatPanelProps) {
-  const { templateId, documentName, messages, onMessages, values, onValues, onReset, onUseForm } = props;
+  const { templateId, greetingText, messages, onMessages, values = NO_VALUES, onValues, onReset } = props;
+  const { onNavigate, onUseForm, noFormHint, className = "h-[32rem] lg:h-[calc(100vh-7rem)]" } = props;
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<ChatFailure | null>(null);
@@ -52,8 +67,16 @@ export function ChatPanel(props: ChatPanelProps) {
     try {
       const turn = await sendChat(templateId, conversation, values, { signal: controller.signal });
       if (controller.signal.aborted) return;
-      onValues(turn.values);
-      onMessages([...conversation, { role: "assistant", content: turn.reply }]);
+      const answered: ChatMessage[] = [...conversation, { role: "assistant", content: turn.reply }];
+      if (turn.template_id && turn.template_id !== templateId) {
+        // The conversation continues on the new document's page. This panel stays "Thinking…"
+        // (request.current is released without resetting pending) until the page changes.
+        request.current = null;
+        onNavigate(turn.template_id, answered, turn.values);
+        return;
+      }
+      onValues?.(turn.values);
+      onMessages(answered);
     } catch (error) {
       if (controller.signal.aborted) return; // Start over or unmount: not an error.
       setFailure(chatFailure(error));
@@ -86,12 +109,12 @@ export function ChatPanel(props: ChatPanelProps) {
   // Retry resends the same conversation.
   const unanswered = !pending && messages.at(-1)?.role === "user";
   const canRetry = unanswered && (failure?.retryable ?? true);
-  const transcript: ChatMessage[] = [{ role: "assistant", content: greeting(documentName) }, ...messages];
+  const transcript: ChatMessage[] = [{ role: "assistant", content: greetingText }, ...messages];
 
   return (
     <section
       aria-label="Chat with the drafting assistant"
-      className="flex h-[32rem] flex-col rounded-lg border border-stone-200 bg-white shadow-sm lg:h-[calc(100vh-7rem)]"
+      className={`flex flex-col rounded-lg border border-stone-200 bg-white shadow-sm ${className}`}
     >
       <div className="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
         <h2 className="text-sm font-semibold tracking-wide text-stone-500 uppercase">Drafting assistant</h2>
@@ -130,11 +153,12 @@ export function ChatPanel(props: ChatPanelProps) {
                   Retry
                 </button>
               )}
-              {!failure.retryable && (
+              {!failure.retryable && onUseForm && (
                 <button type="button" onClick={onUseForm} className="font-medium underline">
                   Use the form instead
                 </button>
               )}
+              {!failure.retryable && !onUseForm && noFormHint && <span>{noFormHint}</span>}
             </div>
           </div>
         )}

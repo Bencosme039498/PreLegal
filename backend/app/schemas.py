@@ -26,7 +26,7 @@ class Health(BaseModel):
     status: str
 
 
-# ---- AI chat (PL-7). MAX_MESSAGE_CHARS mirrors frontend/src/lib/chat.ts; MAX_MESSAGES only bounds
+# ---- AI chat. MAX_MESSAGE_CHARS mirrors frontend/src/lib/chat.ts; MAX_MESSAGES only bounds
 # the request size (the chat service sends the model the last chat.MAX_HISTORY messages). ----
 
 MAX_MESSAGE_CHARS = 2000
@@ -41,7 +41,8 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    template_id: Annotated[str, StringConstraints(max_length=100)]
+    # The document the conversation is about; None (e.g. on the home page) lets the AI choose it.
+    template_id: Annotated[str, StringConstraints(max_length=100)] | None = None
     messages: Annotated[list[ChatMessage], Field(min_length=1, max_length=MAX_MESSAGES)]
     # The document's current field values (validated against the template by the chat service).
     values: Annotated[
@@ -61,7 +62,10 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-    # Every field that has a valid value after this turn (raw text; the frontend escapes it).
+    # The document the conversation is now about: None while still choosing; when it differs from
+    # the request's template_id (chosen or switched), the client opens that document.
+    template_id: str | None
+    # Every field of template_id that has a valid value (raw text; the frontend escapes it).
     values: dict[str, str]
     # Whether every required field has a value.
     complete: bool

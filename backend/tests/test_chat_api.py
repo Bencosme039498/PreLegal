@@ -2,7 +2,9 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from app.config import Settings
 from app.llm import LlmError
 from app.schemas import MAX_MESSAGE_CHARS, MAX_MESSAGES
 from tests.conftest import FakeLlm
@@ -23,6 +25,7 @@ def test_chat_turn(client: TestClient, fake_llm: FakeLlm) -> None:
     assert res.status_code == 200
     assert res.json() == {
         "reply": fake_llm.reply,
+        "template_id": "mutual-nda",
         "values": {
             "term_years": "2",
             "confidentiality_period_years": "3",
@@ -42,9 +45,37 @@ def test_values_are_optional(client: TestClient) -> None:
     assert client.post("/api/chat", json=body).status_code == 200
 
 
-@pytest.mark.parametrize("template_id", ["unilateral-nda", "no-such-template"])
-def test_unsupported_template_is_a_coded_404(client: TestClient, fake_llm: FakeLlm, template_id: str) -> None:
-    res = client.post("/api/chat", json=chat_body(template_id=template_id))
+@pytest.mark.parametrize("template_id", ["unilateral-nda", "promissory-note", "employment-offer-letter"])
+def test_every_template_is_supported(client: TestClient, fake_llm: FakeLlm, template_id: str) -> None:
+    res = client.post("/api/chat", json=chat_body(template_id=template_id, values={}))
+    assert res.status_code == 200
+    assert res.json()["template_id"] == template_id
+
+
+@pytest.mark.parametrize("body_template", [{}, {"template_id": None}])
+def test_without_a_template_the_ai_chooses_one(
+    client: TestClient, fake_llm: FakeLlm, body_template: dict
+) -> None:
+    body = {"messages": [{"role": "user", "content": "I need an NDA"}], **body_template}
+    res = client.post("/api/chat", json=body)
+    assert res.status_code == 200
+    assert res.json() == {
+        "reply": fake_llm.selection_reply,
+        "template_id": None,
+        "values": {},
+        "complete": False,
+    }
+
+    fake_llm.template_id = "mutual-nda"
+    res = client.post("/api/chat", json=body)
+    assert res.json()["template_id"] == "mutual-nda"
+    assert res.json()["values"] == {"term_years": "2", "confidentiality_period_years": "3"}
+    assert fake_llm.models == ["SelectionTurn", "SelectionTurn", "ChatTurn"]
+    assert all(t is not None and t <= 20 for t in fake_llm.timeouts)
+
+
+def test_unknown_template_is_a_coded_404(client: TestClient, fake_llm: FakeLlm) -> None:
+    res = client.post("/api/chat", json=chat_body(template_id="no-such-template"))
     assert res.status_code == 404
     assert res.json()["detail"]["code"] == "unknown_template"
     assert res.json()["detail"]["retryable"] is False
@@ -62,7 +93,7 @@ def test_unsupported_template_is_a_coded_404(client: TestClient, fake_llm: FakeL
         {"messages": [{"role": "user", "content": "hi"}] * (MAX_MESSAGES + 1)},
         {"values": {"party_a_name": "x" * 5001}},
         {"values": {f"k{i}": "v" for i in range(101)}},
-        {"template_id": None},
+        {"template_id": ["mutual-nda"]},
     ],
 )
 def test_invalid_requests_are_422(client: TestClient, fake_llm: FakeLlm, overrides: dict) -> None:
@@ -89,3 +120,10 @@ def test_unknown_api_paths_near_chat_still_get_the_json_404(client: TestClient) 
     for res in (client.get("/api/chat"), client.post("/api/chat/extra", json={})):
         assert res.status_code == 404
         assert res.json() == {"detail": "Not found"}
+
+
+@pytest.mark.parametrize("budget_s", [0, 60, 90])
+def test_chat_budget_must_fit_the_frontend_timeout(budget_s: float) -> None:
+    # The frontend aborts after 60 s; the server's budget must end first so its answer arrives.
+    with pytest.raises(ValidationError):
+        Settings(chat_budget_s=budget_s)

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from . import chat, db
 from .config import Settings
-from .llm import LlmError, StructuredLlm
+from .llm import LlmError, StructuredLlm, error_detail
 from .schemas import ChatRequest, ChatResponse, Health, SessionRequest, UserOut
 from .templates import TemplateDef
 
@@ -49,24 +49,28 @@ def chat_turn(
     body: ChatRequest,
     catalog: Annotated[dict[str, TemplateDef], Depends(get_catalog)],
     llm: Annotated[StructuredLlm, Depends(get_llm)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> ChatResponse:
-    """AI chat that fills in a template's fields. Stateless: the client sends the whole conversation.
+    """AI chat that picks a document (no template_id) and fills in its fields. Stateless: the
+    client sends the whole conversation; the response's template_id says which document it is now about.
 
     Errors use the envelope {"detail": {"code", "message", "retryable"}}; the frontend shows the
     message in the chat (and offers Retry when retryable) instead of treating it as "no backend".
     """
-    template = catalog.get(body.template_id)
-    if template is None or template.id not in chat.CHAT_TEMPLATE_IDS:
+    if body.template_id is not None and body.template_id not in catalog:
         raise HTTPException(
             status_code=404,
-            detail={
-                "code": "unknown_template",
-                "message": "The AI assistant can't draft this document.",
-                "retryable": False,
-            },
+            detail=error_detail(
+                "unknown_template", "The AI assistant can't draft this document.", retryable=False
+            ),
         )
+    budget = chat.Budget(
+        total_s=settings.chat_budget_s,
+        attempt_cap_s=settings.llm_timeout_s,
+        attempts=settings.llm_max_retries + 1,
+    )
     try:
-        return chat.run_turn(llm, template, body.messages, body.values)
+        return chat.run_chat(llm, catalog, body.template_id, body.messages, body.values, budget)
     except LlmError as e:
         raise HTTPException(status_code=e.status, detail=e.detail()) from None
 
