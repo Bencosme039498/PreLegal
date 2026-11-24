@@ -113,7 +113,7 @@ Ticket numbers match the PL project in Jira.
 - Fake sign-in: `/login/` (name + email, no password) → `POST /api/session` upserts the user; the frontend keeps the user in `localStorage` (`useSession` via `useSyncExternalStore`); app pages are in the `(app)` route group behind client-side `RequireSession`; header shows the user and Sign out. Without a backend (Vercel, `npm run dev`) sign-in is device-only
 - Palette applied as Tailwind tokens `brand-yellow`, `brand-blue`, `brand-purple`, `brand-navy`, `brand-gray`
 - Start/stop scripts: `start-unix.sh`/`stop-unix.sh` hold the logic, mac/linux scripts wrap them; Windows `.ps1`; `PRELEGAL_PORT` overrides port 8000
-- Tests: pytest (`cd backend && uv run pytest`, 30 tests) for API, DB reset, concurrent sign-ins and static serving; Vitest (`cd frontend && npm test`, 53 tests) for `fill-template.ts`, `api-client.ts` and `session.ts`
+- Tests: pytest (`cd backend && uv run pytest`) for API, DB reset, concurrent sign-ins and static serving; Vitest (`cd frontend && npm test`) for `fill-template.ts`, `api-client.ts` and `session.ts` (30 and 53 tests at PL-6; current totals under PL-7)
 
 ### Completed (PL-7) — Add AI Chat but still just Mutual NDA
 - **Endpoint:** `POST /api/chat` is stateless. The client sends `{template_id, messages, values}` and gets `{reply, values, complete}`.
@@ -156,7 +156,7 @@ Ticket numbers match the PL project in Jira.
 ## Latest update (2026-11-24)
 
 - **PL-6 done**: merged in PR #9 (`bae9788`); Jira status Listo.
-- **PL-7 implemented** on `feature/PL-7-ai-chat-mutual-nda`: AI chat for the Mutual NDA (see Completed (PL-7)). This branch includes the CLAUDE.md update from PR #10.
+- **PL-7 done**: AI chat for the Mutual NDA (see Completed (PL-7)), merged to `main` in PR #11 (`1cc1142`); Jira status Listo. The CLAUDE.md update from PR #10 was merged with it. Branches `feature/PL-7-ai-chat-mutual-nda` and `docs/claude-md-status` are kept.
 - **Verified for PL-7**:
   - backend and frontend tests, lint, type-check and builds pass;
   - the Docker image runs healthy as a non-root user;
@@ -170,4 +170,4 @@ Ticket numbers match the PL project in Jira.
   - Locally, port 8000 is often taken by another container (`pm-mvp-api`); use `PRELEGAL_PORT=8001`.
   - pytest prints a Starlette deprecation warning about `httpx`; the fix is to switch the dev dependency to `httpx2`.
   - `/api/chat` is unauthenticated (PL-9).
-- **Next**: PL-8 (all document types via chat). Add a per-template chat flag or open `CHAT_TEMPLATE_IDS`, and let the AI choose the template.
+- **Next**: PL-8 (all document types via chat). Add a per-template chat flag or open `CHAT_TEMPLATE_IDS`, and let the AI choose the template. Known follow-ups from the PL-7 review, left for later: values the AI sends that are too long are dropped without telling the model, and `CHAT_TEMPLATE_IDS` is listed in both the backend and the frontend.
