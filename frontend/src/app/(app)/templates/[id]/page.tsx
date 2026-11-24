@@ -22,10 +22,10 @@ export default async function TemplatePage({ params }: PageProps<"/templates/[id
   return (
     <>
       <header className="mb-8 print:hidden">
-        <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+        <Link href="/" className="text-sm font-medium text-brand-blue hover:text-brand-blue/80">
           <span aria-hidden="true">←</span> All templates
         </Link>
-        <h1 className="mt-2 font-serif text-3xl font-semibold text-stone-900">{template.name}</h1>
+        <h1 className="mt-2 font-serif text-3xl font-semibold text-brand-navy">{template.name}</h1>
         <p className="mt-2 max-w-3xl text-stone-600">
           {template.description} Fill in the details below and the document updates as you type. When every field is
           complete, download it as a PDF or Markdown file.
