@@ -60,10 +60,11 @@ The whole app (frontend + backend + temporary database) runs in one Docker conta
 
 The start script builds the image, (re)starts the `prelegal` container and waits until it is healthy. On macOS/Linux run the scripts with `bash scripts/start-mac.sh` if they are not executable. If port 8000 is taken, set `PRELEGAL_PORT` (e.g. `PRELEGAL_PORT=8001 scripts/start-linux.sh`, or `$env:PRELEGAL_PORT = 8001` in PowerShell).
 
-- **Sign-in** is a placeholder for now (PL-6): enter any name and email, no password. Real accounts arrive with PL-9.
-- **The database is temporary**: SQLite inside the container, recreated from scratch every time the container starts.
+- **Accounts** (PL-9): create an account (name, email, password) at `/signup/`, then sign in at `/login/`. Passwords are hashed with scrypt; the session lives in an HttpOnly cookie for 14 days. Repeated failed sign-ins are slowed down.
+- **My documents**: every draft is saved to your account as you chat or type (Draft / Complete). Reopen one from `/documents/` or the dashboard to keep editing or download it again, or delete it. Downloads (PDF and Markdown) carry a notice that the document is a draft subject to legal review.
+- **The database is temporary**: SQLite inside the container, recreated from scratch every time the container starts, so accounts, sessions and documents are wiped on restart (you'll be asked to sign up again).
 - A `.env` file in the repository root, if present, is passed to the container at run time (it is never copied into the image). The AI chat needs `OPENAI_API_KEY` there; `OPENAI_MODEL` is optional (default `gpt-4.1-mini`). Without a key the app still runs: the chat reports it isn't configured, and offers the form on a document page (on the home page, the list of documents below it).
-- **AI chat (every template)**: on the home page, describe what you need and the assistant picks the document. If you ask for something PreLegal can't generate (e.g. a lease), it says so and offers the closest document, or lists what it can draft. It then opens the document's page with the conversation so far and keeps asking for what's missing. Mid-conversation you can ask for a different document: once you confirm, it switches and carries over the details that still apply (dates, governing law…). The backend calls OpenAI through LiteLLM with Structured Outputs; every value the AI extracts is validated on the server before it reaches the document. If the backend isn't reachable (e.g. the static Vercel site), the page falls back to the form. `/api/chat` has no authentication or rate limit yet (fake sign-in until PL-9), so anyone who can reach the server can spend OpenAI credits.
+- **AI chat (every template)**: on the home page, describe what you need and the assistant picks the document. If you ask for something PreLegal can't generate (e.g. a lease), it says so and offers the closest document, or lists what it can draft. It then opens the document's page with the conversation so far and keeps asking for what's missing. Mid-conversation you can ask for a different document: once you confirm, it switches and carries over the details that still apply (dates, governing law…). The backend calls OpenAI through LiteLLM with Structured Outputs; every value the AI extracts is validated on the server before it reaches the document. `/api/chat` needs a signed-in user and is rate limited per user (30 turns a minute by default). If the backend isn't reachable (e.g. the static Vercel site), there are no accounts: a labelled demo sign-in opens the form-based editor, and nothing is saved.
 
 ### Architecture
 
@@ -78,9 +79,16 @@ Docker image
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/health` | Health check |
-| `POST /api/session` | Fake sign-in: records `{name, email}` in the `users` table and returns the user |
-| `POST /api/chat` | One AI chat turn: `{template_id?, messages, values}` → `{reply, template_id, values, complete}`. Without `template_id` the AI picks the document; a response `template_id` that differs from the request's means the AI chose or switched documents. Errors return `{"detail": {"code", "message", "retryable"}}` |
+| `POST /api/auth/signup` | Create an account `{name, email, password}` and sign in (sets the session cookie); 409 `email_taken` |
+| `POST /api/auth/login` | Sign in `{email, password}`; 401 `invalid_credentials`, 429 `too_many_attempts` |
+| `POST /api/auth/logout` | Sign out (ends the session, clears the cookie) |
+| `GET /api/auth/me` | The signed-in user, or 401 `not_authenticated` |
+| `GET, POST /api/documents` | The user's saved documents (newest first) / save a new draft `{template_id, title, values, messages}` |
+| `GET, PUT, DELETE /api/documents/{id}` | Open, replace (autosave) or delete one of the user's documents; another user's id is a 404 |
+| `POST /api/chat` | One AI chat turn (signed in; rate limited per user): `{template_id?, messages, values}` → `{reply, template_id, values, complete}`. Without `template_id` the AI picks the document; a response `template_id` that differs from the request's means the AI chose or switched documents |
 | `GET /api/docs` | Interactive API docs |
+
+Errors return `{"detail": {"code", "message", "retryable"}}`. Optional settings (`PRELEGAL_*` environment variables): `SESSION_TTL_S` (default 14 days), `COOKIE_SECURE` (set `true` when serving over HTTPS), `CHAT_RATE_LIMIT` / `CHAT_RATE_WINDOW_S` (30 per 60 s), `AUTH_RATE_LIMIT` / `AUTH_RATE_WINDOW_S` (10 failed sign-ins or sign-ups per 300 s), `MAX_DOCUMENTS_PER_USER` (200).
 
 ### Development
 

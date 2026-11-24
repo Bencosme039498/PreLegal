@@ -36,7 +36,7 @@ export function HomeChat() {
   };
 
   return (
-    <section aria-labelledby="home-chat-title" className="mb-10">
+    <section aria-labelledby="home-chat-title">
       <h2 id="home-chat-title" className="mb-3 font-serif text-xl font-semibold text-brand-navy">
         What do you need to draft?
       </h2>
@@ -48,7 +48,7 @@ export function HomeChat() {
         onReset={() => setMessages([])}
         onNavigate={openDocument}
         noFormHint="You can still pick a document below."
-        className="h-[24rem]"
+        className="h-[26rem]"
       />
     </section>
   );

@@ -35,6 +35,22 @@ export function isErrorEnvelope(detail: unknown): detail is ErrorEnvelope {
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
+/** The code of a 401 for a missing or expired session (a wrong password is invalid_credentials). */
+export const NOT_AUTHENTICATED = "not_authenticated";
+
+let onUnauthenticated: (() => void) | null = null;
+
+/**
+ * Runs `handler` whenever the backend answers 401 not_authenticated: the session ended (expired,
+ * signed out in another tab, or the server restarted with a fresh database). Returns an unsubscribe.
+ */
+export function setUnauthenticatedHandler(handler: (() => void) | null): () => void {
+  onUnauthenticated = handler;
+  return () => {
+    if (onUnauthenticated === handler) onUnauthenticated = null;
+  };
+}
+
 /** AbortSignal.any, with a fallback for browsers without it (Safari < 17.4, Firefox < 124). */
 function anySignal(signals: AbortSignal[]): AbortSignal {
   if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
@@ -76,6 +92,7 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
     throw new ApiUnavailableError(error);
   }
 
+  if (res.status === 204) return undefined as T;
   const isJson = res.headers.get("content-type")?.includes("application/json") ?? false;
   if (!isJson) throw new ApiUnavailableError(`HTTP ${res.status}`);
   let body: unknown;
@@ -87,7 +104,10 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
   if (res.ok) return body as T;
 
   const detail = (body as { detail?: unknown } | null)?.detail;
-  if (isErrorEnvelope(detail)) throw new ApiError(res.status, detail);
+  if (isErrorEnvelope(detail)) {
+    if (res.status === 401 && detail.code === NOT_AUTHENTICATED) onUnauthenticated?.();
+    throw new ApiError(res.status, detail);
+  }
   if (res.status === 404 || res.status === 405 || res.status >= 500) throw new ApiUnavailableError(`HTTP ${res.status}`);
   throw new ApiError(res.status, detail);
 }

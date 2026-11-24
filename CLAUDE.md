@@ -8,7 +8,7 @@ The target document set is the CommonPaper catalog in the root `catalog.json`, i
 
 @catalog.json
 
-The current implementation is the V1 technical foundation (PL-6) plus AI chat for every template (PL-7, PL-8): a creator for the 8 templates in `data/templates/catalog.json` (Next.js static export) served by a FastAPI backend with a temporary SQLite database, packaged in Docker, behind a fake sign-in. Documents are chosen and filled in by chatting with an AI assistant (OpenAI via LiteLLM); without a backend the form takes over. There is no real authentication yet — see Implementation Status below.
+The current implementation is the V1 technical foundation (PL-6), AI chat for every template (PL-7, PL-8), and accounts with saved documents (PL-9): a creator for the 8 templates in `data/templates/catalog.json` (Next.js static export) served by a FastAPI backend with a temporary SQLite database, packaged in Docker. Users sign up and sign in (password, HttpOnly session cookie), and every draft autosaves to their "My documents". Documents are chosen and filled in by chatting with an AI assistant (OpenAI via LiteLLM). Without a backend (static hosting) there are no accounts: a labelled demo sign-in opens the form, and nothing is saved. See Implementation Status below.
 
 Note: the CommonPaper template files listed in the root `catalog.json` (e.g. `Mutual-NDA.md`) are not in the repo yet. The app uses its own dataset in `data/templates/` (8 templates with its own `catalog.json` and `catalog.schema.json`); the frontend reads it at build time.
 
@@ -51,6 +51,11 @@ Optional backend/script variables (defaults are fine for Docker):
 - `PRELEGAL_TEMPLATES_DIR` - template catalog the chat builds its prompt and schema from (default: repo `data/templates`; `/app/data/templates` in the container)
 - `PRELEGAL_LLM_TIMEOUT_S`, `PRELEGAL_LLM_MAX_RETRIES` - per-attempt timeout (default `20`) and retries after a failed attempt (default `1`; the chat retries itself within its budget, the OpenAI client doesn't)
 - `PRELEGAL_CHAT_BUDGET_S` - total time for one `/api/chat` request, which may make two LLM calls (default `50`; must be below the frontend's 60 s timeout, enforced by validation)
+- `PRELEGAL_SESSION_TTL_S` - how long a sign-in lasts (default 14 days)
+- `PRELEGAL_COOKIE_SECURE` - `true` makes the session cookie HTTPS-only; leave it off for the plain-http Docker scripts (put it in `.env` for an HTTPS deployment)
+- `PRELEGAL_CHAT_RATE_LIMIT`, `PRELEGAL_CHAT_RATE_WINDOW_S` - AI chat turns per user per window (default `30` per `60` s)
+- `PRELEGAL_AUTH_RATE_LIMIT`, `PRELEGAL_AUTH_RATE_WINDOW_S` - failed sign-ins per email and per address, and sign-ups per address, per window (default `10` per `300` s)
+- `PRELEGAL_MAX_DOCUMENTS_PER_USER` - saved drafts per user (default `200`)
 - `LITELLM_LOCAL_MODEL_COST_MAP` - `True` (set in `llm.py` and the image) so LiteLLM doesn't fetch its model map at import
 
 ## Technical design
@@ -58,7 +63,7 @@ Optional backend/script variables (defaults are fine for Docker):
 The entire project should be packaged into a Docker container.  
 The backend should be in backend/ and be a uv project, using FastAPI.  
 The frontend should be in frontend/  
-The database should use SQLite and be created from scratch each time the Docker container is brought up, allowing for a users table with sign up and sign in (the `users` table exists; sign-in is a fake name + email screen until PL-9).  
+The database should use SQLite and be created from scratch each time the Docker container is brought up, allowing for a users table with sign up and sign in (done in PL-9: `users`, `sessions` and `documents` tables).  
 The frontend is statically built (Next.js `output: "export"`) and served by FastAPI.  
 There should be scripts in scripts/ for:  
 ```bash
@@ -111,7 +116,7 @@ Ticket numbers match the PL project in Jira.
 - Backend `backend/` (uv project, no packaging): `app/main.py` (`create_app` factory, run with `uvicorn app.main:create_app --factory`), `config.py` (pydantic-settings, `PRELEGAL_DB_PATH`, `PRELEGAL_STATIC_DIR`), `db.py` (stdlib sqlite3, no ORM), `schemas.py`, `api.py`
 - SQLite deleted and recreated on every app start (`users` table, email unique case-insensitive); connections use `check_same_thread=False` because FastAPI runs a sync dependency's setup and teardown on different threads
 - Static export mounted at `/` after the API; unknown pages get `404.html`, unknown `/api/*` paths get a JSON 404; API docs at `/api/docs`
-- Fake sign-in: `/login/` (name + email, no password) → `POST /api/session` upserts the user; the frontend keeps the user in `localStorage` (`useSession` via `useSyncExternalStore`); app pages are in the `(app)` route group behind client-side `RequireSession`; header shows the user and Sign out. Without a backend (Vercel, `npm run dev`) sign-in is device-only
+- Fake sign-in (replaced by real accounts in PL-9): `/login/` (name + email, no password) → `POST /api/session` upserted the user; the frontend keeps the user in `localStorage` (`useSession` via `useSyncExternalStore`); app pages are in the `(app)` route group behind client-side `RequireSession`; header shows the user and Sign out. Without a backend (Vercel, `npm run dev`) sign-in is device-only
 - Palette applied as Tailwind tokens `brand-yellow`, `brand-blue`, `brand-purple`, `brand-navy`, `brand-gray`
 - Start/stop scripts: `start-unix.sh`/`stop-unix.sh` hold the logic, mac/linux scripts wrap them; Windows `.ps1`; `PRELEGAL_PORT` overrides port 8000
 - Tests: pytest (`cd backend && uv run pytest`) for API, DB reset, concurrent sign-ins and static serving; Vitest (`cd frontend && npm test`) for `fill-template.ts`, `api-client.ts` and `session.ts` (30 and 53 tests at PL-6; current totals under PL-8)
@@ -178,22 +183,57 @@ Ticket numbers match the PL project in Jira.
   - the PL-7 NDA flow still works;
   - the no-backend fallback works.
 
-### To do (PL-9) — Support multiple users & final polish
-- Real sign up / sign in (users table) and per-user documents
+### Completed (PL-9) — Support multiple users & final polish
+- **Accounts** (`backend/app/auth.py`): `POST /api/auth/signup|login|logout`, `GET /api/auth/me`.
+  - Passwords: stdlib `hashlib.scrypt` (`scrypt$n$r$p$salt$hash`). Unknown emails are checked against a dummy hash, and a wrong password or an unknown email both give 401 `invalid_credentials`.
+  - Sessions: a random token in the HttpOnly, SameSite=Lax cookie `prelegal_session`; the `sessions` table keeps only its SHA-256 and an expiry. The `CurrentUser` dependency gives 401 `not_authenticated`. A restart wipes the database, so everyone signs in again.
+  - Rate limits (`ratelimit.py`: in memory, sliding window, clock injectable via `create_app(..., clock=)`): failed sign-ins per email and per address, sign-ups per address (429 `too_many_attempts` with `Retry-After`), and `/api/chat` turns per user (429 `chat_rate_limited`).
+  - `/api/session` is gone; `/api/chat` needs a signed-in user.
+- **Saved documents** (`documents.py`, queries in `db.py`): `GET/POST /api/documents`, `GET/PUT/DELETE /api/documents/{id}`.
+  - Every query is scoped by `user_id`: another user's id is a 404.
+  - Values are stored as typed (unknown keys dropped); `complete` uses the chat's rules; PUT replaces the whole draft (title, values, messages). Ids are bounded to SQLite's integer range.
+- **Backend structure**:
+  - Shared dependencies are in `deps.py` (`DbConn`, `SettingsDep`, `Catalog`, `Clock`, the limiters, `api_error`).
+  - `DbConn` uses `scope="function"`, so the transaction commits **before** the response is sent. With the default "request" scope it committed afterwards, and a request right after sign-in could get a 401.
+  - The JSON 404 catch-all is `api.fallback`, included last in `main.py`.
+  - `PRAGMA foreign_keys = ON` per connection (cascade on user delete).
+- **Frontend**:
+  - `lib/session.ts`: `signUp`, `signIn`, `signOut(user)`, `fetchCurrentUser`, `demoUser`, `forgetUser`, and validators mirroring the backend. `localStorage` only caches the user: `RequireSession` checks it with `/api/auth/me`, and `setUnauthenticatedHandler` (`api-client.ts`) signs the tab out on any 401 `not_authenticated`. `apiRequest` returns `undefined` for a 204.
+  - `/login/` and `/signup/` share `AuthShell` and `AuthForm`; with no backend they offer the labelled demo sign-in.
+  - Autosave: `lib/autosave.ts` (framework-free: debounce, one save at a time, a failed snapshot kept for Retry, `flushAllAutosavers` before sign-out) and `useDocumentAutosave`. The first save creates the document and `history.replaceState`s `?doc=<id>`; unchanged content is never saved.
+  - `DocumentLoader` picks the draft: `?doc=<id>` (the tab's copy if it has that id, otherwise fetched), or, without `?doc`, a new draft or an unsaved AI handoff from sessionStorage (`StoredChat.docId` marks a saved one). "New draft" remounts the builder. An AI switch saves the current draft (with the AI's answer) before opening the next.
+  - `/documents/` (`DocumentsList`: Draft/Complete badge, open, delete with confirm); the dashboard shows the five most recent next to the home chat.
+  - Polish: `AppNav` top bar, `SiteFooter`, `components/ui` (`buttonClass`, `cardClass`, `StatusBadge`, `TextField`, `Disclaimer`), `SaveIndicator`.
+  - Disclaimer (`lib/disclaimer.ts`): above the preview and printed with the PDF, at the top of the Markdown download, in the footer and on the sign-up page.
+- **Tests**:
+  - pytest 234: auth, sessions, expiry, rate limits, documents (including cross-user access), the commit-before-response regression, the secure cookie, settings bounds.
+  - Vitest 131: session, documents, autosave, disclaimer, api-client 204/401, chat storage.
+- **Verified** with a local backend serving the export and real OpenAI:
+  - sign up, then the home chat opens the NDA and the draft saves as `?doc=1`;
+  - a reload and a fresh tab restore the values and the chat;
+  - My documents lists it; sign out (the chat then answers 401); a wrong password is refused; sign in again;
+  - a cleared cookie sends the user to sign in; delete works;
+  - demo mode on a static server: demo sign-in, no My documents, the form works.
 
 ### To do (PL-1) — Simple website describing the PreLegal company
 
 ### API Endpoints
 - `GET /api/health` - Health check
-- `POST /api/session` - Fake sign-in: upserts `{name, email}` into `users` and returns `{id, name, email}` (no authentication)
-- `POST /api/chat` - One AI chat turn: `{template_id?, messages, values}` → `{reply, template_id, values, complete}`. Omit `template_id` to let the AI choose the document; a different response `template_id` means chosen or switched. Errors are `{"detail": {code, message, retryable}}` (no auth or rate limit until PL-9)
+- `POST /api/auth/signup` - `{name, email, password}` → `{id, name, email}`, sets the session cookie (409 `email_taken`)
+- `POST /api/auth/login` - `{email, password}` → the user, sets the cookie (401 `invalid_credentials`, 429 `too_many_attempts`)
+- `POST /api/auth/logout` - ends the session and clears the cookie (204)
+- `GET /api/auth/me` - the signed-in user (401 `not_authenticated`)
+- `GET /api/documents` - the user's documents, newest first (no contents); `POST` creates one `{template_id, title?, values?, messages?}` (404 `unknown_template`, 409 `document_limit`)
+- `GET|PUT|DELETE /api/documents/{id}` - one of the user's documents (404 `document_not_found`)
+- `POST /api/chat` - One AI chat turn (signed in; 429 `chat_rate_limited`): `{template_id?, messages, values}` → `{reply, template_id, values, complete}`. Omit `template_id` to let the AI choose the document; a different response `template_id` means chosen or switched. Errors are `{"detail": {code, message, retryable}}`
 - `GET /api/docs`, `GET /api/openapi.json` - API docs
 
 ## Latest update (2026-11-24)
 
 - **PL-6 done**: merged in PR #9 (`bae9788`); Jira status Listo.
 - **PL-7 done**: AI chat for the Mutual NDA (see Completed (PL-7)), merged to `main` in PR #11 (`1cc1142`); Jira status Listo. The CLAUDE.md update from PR #10 was merged with it. Branches `feature/PL-7-ai-chat-mutual-nda` and `docs/claude-md-status` are kept.
-- **PL-8 implemented** on `feature/PL-8-all-document-types` (see Completed (PL-8)); PR pending merge.
+- **PL-8 done**: merged to `main` in PR #12 (`41a4783`).
+- **PL-9 implemented** on `feature/PL-9-multi-user-polish` (see Completed (PL-9)); PR pending merge.
 - **Verified for PL-7**:
   - backend and frontend tests, lint, type-check and builds pass;
   - the Docker image runs healthy as a non-root user;
@@ -206,7 +246,10 @@ Ticket numbers match the PL project in Jira.
 - **Known quirks**:
   - Locally, port 8000 is often taken by another container (`pm-mvp-api`); use `PRELEGAL_PORT=8001`.
   - pytest prints a Starlette deprecation warning about `httpx`; the fix is to switch the dev dependency to `httpx2`.
-  - `/api/chat` is unauthenticated (PL-9).
-- **Next**: PL-9 (real accounts and saved documents per user; also put auth and a rate limit on `/api/chat`). Known follow-ups:
+  - Rate limits live in memory and sessions in the temporary database: fine for the single container, reset on restart.
+  - Behind a reverse proxy the rate limits would see the proxy's address (they use `request.client.host`).
+- **Next**: PL-1 (company website). Known follow-ups:
+  - the same document open in two tabs is last-save-wins;
+  - a save whose response is lost (a timeout after the server created it) is retried as a second document;
   - values the AI sends that are too long are dropped without telling the model;
   - the README screenshots other than the home page still show the form on the static site.

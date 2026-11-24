@@ -15,6 +15,8 @@ from app.main import create_app
 FAKE_EXPORT = {
     "index.html": "<h1>home</h1>",
     "login/index.html": "<h1>login</h1>",
+    "signup/index.html": "<h1>signup</h1>",
+    "documents/index.html": "<h1>documents</h1>",
     "templates/mutual-nda/index.html": "<h1>mutual nda</h1>",
     "404.html": "<h1>custom not found</h1>",
     "_next/static/chunks/app.js": "console.log('app')",
@@ -95,7 +97,36 @@ def fake_llm() -> FakeLlm:
 
 
 @pytest.fixture
-def client(settings: Settings, fake_llm: FakeLlm) -> Iterator[TestClient]:
+def client(settings: Settings, fake_llm: FakeLlm, clock: "FakeClock") -> Iterator[TestClient]:
     # The context manager runs the lifespan, which creates the database. Tests never call OpenAI.
-    with TestClient(create_app(settings, llm=fake_llm)) as c:
+    # The client starts signed out; sign_up() signs it in (it keeps the session cookie).
+    with TestClient(create_app(settings, llm=fake_llm, clock=clock)) as c:
         yield c
+
+
+class FakeClock:
+    """Unix time that only moves when a test advances it (session expiry, rate limits)."""
+
+    def __init__(self, start: float = 1_800_000_000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.fixture
+def clock() -> FakeClock:
+    return FakeClock()
+
+
+PASSWORD = "correct horse battery"
+
+
+def sign_up(client: TestClient, email: str = "jane@example.com", name: str = "Jane Smith") -> dict[str, Any]:
+    """Creates an account; the client keeps its session cookie, so later requests are signed in."""
+    res = client.post("/api/auth/signup", json={"name": name, "email": email, "password": PASSWORD})
+    assert res.status_code == 201, res.text
+    return res.json()
