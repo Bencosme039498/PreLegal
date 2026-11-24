@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { chatStorageKey, clearChat, isChatAvailable, loadChat, saveChat, type ChatMessage } from "@/lib/chat";
 import {
   documentFilename,
   fillTemplate,
@@ -12,7 +13,9 @@ import {
   type FieldSection,
   type FieldValues,
 } from "@/lib/fill-template";
-import { FieldInput } from "./FieldInput";
+import { ChatPanel } from "./ChatPanel";
+import { FormEditor } from "./FormEditor";
+import { useSession } from "./session/useSession";
 
 interface DocumentBuilderProps {
   /** Document name, used as the start of downloaded file names. */
@@ -21,14 +24,49 @@ interface DocumentBuilderProps {
   body: string;
   /** The template's fields grouped into form sections (see groupFields). */
   sections: FieldSection[];
+  /** Set when the AI assistant supports this template: the chat replaces the form. */
+  chatTemplateId?: string;
 }
+
+/** Whether the AI assistant's backend answers here ("checking" until the health probe returns). */
+type ChatAvailability = "checking" | "available" | "unavailable";
 
 const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
-/** Form + live preview of a filled-in template, with Markdown and PDF downloads. */
-export function DocumentBuilder({ name, body, sections }: DocumentBuilderProps) {
+/**
+ * AI chat (or form) + live preview of a filled-in template, with Markdown and PDF downloads.
+ *
+ * Only rendered for a signed-in user (RequireSession), so never during prerendering: the lazy state
+ * initialisers may read sessionStorage.
+ */
+export function DocumentBuilder({ name, body, sections, chatTemplateId }: DocumentBuilderProps) {
   const fields = useMemo(() => sections.flatMap((s) => s.fields), [sections]);
-  const [values, setValues] = useState<FieldValues>(() => initialValues(fields));
+  const { user } = useSession();
+  const storageKey = chatTemplateId && user ? chatStorageKey(user.email, chatTemplateId) : null;
+  const [saved] = useState(() => (storageKey ? loadChat(storageKey, fields.map((f) => f.key)) : null));
+  const [values, setValues] = useState<FieldValues>(() => ({ ...initialValues(fields), ...saved?.values }));
+  const [messages, setMessages] = useState<ChatMessage[]>(() => saved?.messages ?? []);
+  const [availability, setAvailability] = useState<ChatAvailability>(chatTemplateId ? "checking" : "unavailable");
+  /** The user chose to fill in the form by hand instead of chatting. */
+  const [manual, setManual] = useState(false);
+  const editor = availability === "checking" ? "checking" : availability === "available" && !manual ? "chat" : "form";
+
+  // The assistant needs the backend: on a static-only host (Vercel, next dev) fall back to the form.
+  useEffect(() => {
+    if (!chatTemplateId) return;
+    let active = true;
+    void isChatAvailable().then((available) => {
+      if (active) setAvailability(available ? "available" : "unavailable");
+    });
+    return () => {
+      active = false;
+    };
+  }, [chatTemplateId]);
+
+  // Keep the conversation and the document for this tab (sessionStorage is cleared when it closes).
+  useEffect(() => {
+    if (storageKey) saveChat(storageKey, { messages, values });
+  }, [storageKey, messages, values]);
 
   const markdown = useMemo(() => fillTemplate(body, fields, values), [body, fields, values]);
   const incomplete = incompleteFields(fields, values);
@@ -38,6 +76,12 @@ export function DocumentBuilder({ name, body, sections }: DocumentBuilderProps) 
   const filename = documentFilename(name, ...partyNames);
 
   const setValue = (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value }));
+
+  const startOver = () => {
+    if (storageKey) clearChat(storageKey);
+    setMessages([]);
+    setValues(initialValues(fields));
+  };
 
   const downloadMarkdown = () => {
     const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
@@ -57,16 +101,48 @@ export function DocumentBuilder({ name, body, sections }: DocumentBuilderProps) 
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] print:block">
-      <form className="space-y-6 print:hidden" onSubmit={(e) => e.preventDefault()} noValidate>
-        {sections.map((section) => (
-          <fieldset key={section.title} className="space-y-4 rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
-            <legend className="px-1 text-sm font-semibold tracking-wide text-stone-500 uppercase">{section.title}</legend>
-            {section.fields.map((field) => (
-              <FieldInput key={field.key} field={field} value={values[field.key] ?? ""} onChange={setValue} />
-            ))}
-          </fieldset>
-        ))}
-      </form>
+      <div className={editor === "chat" ? "lg:sticky lg:top-6 lg:self-start print:hidden" : "print:hidden"}>
+        {editor === "checking" && (
+          <p role="status" className="py-12 text-center text-sm text-stone-500">
+            Connecting to the drafting assistant…
+          </p>
+        )}
+        {editor === "chat" && chatTemplateId && (
+          <ChatPanel
+            templateId={chatTemplateId}
+            documentName={name}
+            messages={messages}
+            onMessages={setMessages}
+            values={values}
+            onValues={(updated) => setValues((prev) => ({ ...prev, ...updated }))}
+            onReset={startOver}
+            onUseForm={() => setManual(true)}
+          />
+        )}
+        {editor === "form" && (
+          <>
+            {chatTemplateId && (
+              <p className="mb-4 rounded-lg border border-brand-yellow/60 bg-brand-yellow/10 px-4 py-3 text-sm text-stone-700">
+                {availability === "available" ? (
+                  <>
+                    You&apos;re filling in the form by hand.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setManual(false)}
+                      className="font-medium text-brand-blue underline hover:text-brand-blue/80"
+                    >
+                      Back to the assistant
+                    </button>
+                  </>
+                ) : (
+                  "The AI drafting assistant isn't available here, so fill in the form instead."
+                )}
+              </p>
+            )}
+            <FormEditor sections={sections} values={values} onChange={setValue} />
+          </>
+        )}
+      </div>
 
       <section aria-label="Document preview" className="lg:sticky lg:top-6 lg:self-start">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3 print:hidden">

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, ApiUnavailableError, apiRequest } from "./api-client";
+import { ApiError, ApiUnavailableError, apiRequest, isErrorEnvelope } from "./api-client";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -45,5 +45,63 @@ describe("apiRequest", () => {
         new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))),
     );
     await expect(apiRequest("/api/session", { fetchImpl, timeoutMs: 10 })).rejects.toBeInstanceOf(ApiUnavailableError);
+  });
+
+  it.each([404, 429, 502, 503, 504])("raises ApiError for a coded error envelope with status %i", async (status) => {
+    const detail = { code: "llm_timeout", message: "Took too long.", retryable: true };
+    const error = await apiRequest("/api/chat", { fetchImpl: fetchReturning(json(status, { detail })) }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(status);
+    expect((error as ApiError).detail).toEqual(detail);
+  });
+
+  it("still treats a 5xx without an envelope as unavailable", async () => {
+    const fetchImpl = fetchReturning(json(503, { detail: { code: "x" } })); // incomplete envelope
+    await expect(apiRequest("/api/chat", { fetchImpl })).rejects.toBeInstanceOf(ApiUnavailableError);
+  });
+
+  it("aborts when the caller's signal aborts", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      (_, init) =>
+        new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))),
+    );
+    const controller = new AbortController();
+    const pending = apiRequest("/api/chat", { fetchImpl, signal: controller.signal, timeoutMs: 60_000 });
+    controller.abort();
+    await expect(pending).rejects.toBeInstanceOf(ApiUnavailableError);
+  });
+
+  it("combines the caller's signal and the timeout without AbortSignal.any (older browsers)", async () => {
+    vi.stubGlobal("AbortSignal", Object.assign(Object.create(AbortSignal), { any: undefined, timeout: AbortSignal.timeout }));
+    try {
+      const fetchImpl = vi.fn<typeof fetch>(
+        (_, init) =>
+          new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))),
+      );
+      const controller = new AbortController();
+      const pending = apiRequest("/api/chat", { fetchImpl, signal: controller.signal, timeoutMs: 60_000 });
+      controller.abort();
+      await expect(pending).rejects.toBeInstanceOf(ApiUnavailableError);
+      await expect(apiRequest("/api/chat", { fetchImpl, signal: new AbortController().signal, timeoutMs: 10 })).rejects.toBeInstanceOf(
+        ApiUnavailableError,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("isErrorEnvelope", () => {
+  it.each([
+    [{ code: "a", message: "b", retryable: false }, true],
+    [{ code: "a", message: "b" }, false],
+    [{ code: 1, message: "b", retryable: true }, false],
+    ["Not found", false],
+    [null, false],
+    [[{ loc: ["body"] }], false],
+  ])("%j -> %s", (detail, expected) => {
+    expect(isErrorEnvelope(detail)).toBe(expected);
   });
 });

@@ -13,11 +13,14 @@ from fastapi.staticfiles import StaticFiles
 from . import db
 from .api import router as api_router
 from .config import Settings
+from .llm import LiteLlmClient, StructuredLlm
+from .templates import load_catalog
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, llm: StructuredLlm | None = None) -> FastAPI:
+    """Builds the app. `llm` defaults to LiteLLM -> OpenAI; tests pass a fake."""
     settings = settings or Settings()
 
     @asynccontextmanager
@@ -34,6 +37,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     app.state.settings = settings
+    app.state.catalog = load_catalog(settings.templates_dir)  # fails fast if the dataset is missing
+    app.state.llm = llm or LiteLlmClient(timeout=settings.llm_timeout_s, max_retries=settings.llm_max_retries)
     app.include_router(api_router)
 
     # Mounted last: "/" matches every path, so routes registered after it would be unreachable.

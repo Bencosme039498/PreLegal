@@ -5,6 +5,8 @@ description = "PreLegal API: serves the static frontend and the V1 API at http:/
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.165.0",
+    "litellm>=1.110.3",
+    "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -15,6 +17,8 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Noise from LiteLLM's own type definitions, not from this code.
+filterwarnings = ["ignore:Items? .* (is|are) using the `ReadOnly` qualifier:UserWarning"]
 
 [tool.ruff]
 line-length = 110
