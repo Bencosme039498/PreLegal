@@ -1,15 +1,11 @@
 import { isInvalid, type TemplateField } from "@/lib/fill-template";
+import { inputClass, labelClass } from "./input-styles";
 
 interface FieldInputProps {
   field: TemplateField;
   value: string;
   onChange: (key: string, value: string) => void;
 }
-
-const inputClass =
-  "mt-1 block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm " +
-  "placeholder:text-stone-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none " +
-  "aria-invalid:border-red-500 aria-invalid:focus:ring-red-500/30";
 
 /** Renders the right form control for a catalog field type. */
 export function FieldInput({ field, value, onChange }: FieldInputProps) {
@@ -58,7 +54,7 @@ export function FieldInput({ field, value, onChange }: FieldInputProps) {
 
   return (
     <div>
-      <label htmlFor={field.key} className="block text-sm font-medium text-stone-700">
+      <label htmlFor={field.key} className={labelClass}>
         {field.label}
         {field.required && <span className="ml-0.5 text-red-600" aria-hidden="true">*</span>}
       </label>

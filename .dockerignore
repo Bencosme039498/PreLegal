@@ -1,0 +1,22 @@
+# Secrets: .env is passed at run time with --env-file, never baked into the image.
+**/.env
+**/.env.*
+
+.git
+.claude
+.vercel
+docs
+scripts
+
+**/node_modules
+frontend/.next
+frontend/out
+frontend/tsconfig.tsbuildinfo
+
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+backend/tests
+*.db
+*.db-*

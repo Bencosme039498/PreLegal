@@ -95,7 +95,7 @@ export function DocumentBuilder({ name, body, sections }: DocumentBuilderProps) 
               type="button"
               onClick={downloadPdf}
               disabled={!ready}
-              className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-brand-purple px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-purple/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Download PDF
             </button>
@@ -105,8 +105,8 @@ export function DocumentBuilder({ name, body, sections }: DocumentBuilderProps) 
         <article
           className={
             "prose prose-stone max-w-none overflow-x-auto rounded-lg border border-stone-200 bg-white p-5 shadow-sm sm:p-8 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto " +
-            "prose-headings:font-serif prose-h1:text-center prose-h1:text-2xl prose-h2:text-lg " +
-            "prose-code:rounded prose-code:bg-amber-100 prose-code:px-1 prose-code:py-0.5 prose-code:font-sans prose-code:font-medium prose-code:text-amber-900 " +
+            "prose-headings:font-serif prose-headings:text-brand-navy prose-h1:text-center prose-h1:text-2xl prose-h2:text-lg " +
+            "prose-code:rounded prose-code:bg-brand-yellow/25 prose-code:px-1 prose-code:py-0.5 prose-code:font-sans prose-code:font-medium prose-code:text-brand-navy " +
             "prose-code:before:content-none prose-code:after:content-none " +
             "print:max-h-none print:overflow-visible print:rounded-none print:border-0 print:p-0 print:shadow-none"
           }

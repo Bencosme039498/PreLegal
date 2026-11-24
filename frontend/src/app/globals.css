@@ -7,6 +7,16 @@
   --font-serif: Georgia, Cambria, "Times New Roman", Times, serif;
 }
 
+/* PreLegal palette (CLAUDE.md). #888888 is ~3.5:1 on white: use brand-gray only for large or
+   non-essential text and keep stone-600 for readable secondary copy. */
+@theme {
+  --color-brand-yellow: #ecad0a; /* accent: highlights, header rule, unfilled placeholders */
+  --color-brand-blue: #209dd7; /* primary: links, focus rings, hover states */
+  --color-brand-purple: #753991; /* submit / primary action buttons */
+  --color-brand-navy: #032147; /* headings */
+  --color-brand-gray: #888888; /* tertiary text */
+}
+
 body {
   @apply bg-stone-100 text-stone-900;
 }
