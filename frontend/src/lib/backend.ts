@@ -27,6 +27,12 @@ export const WAKE_BUDGET_MS = 150_000;
 export const PROBE_TIMEOUT_MS = 20_000;
 /** The backend sleeps after 15 idle minutes: after 10 without an answer, check before sending. */
 export const AWAKE_FOR_MS = 10 * 60_000;
+/**
+ * An awake backend answers a health check in well under a second. A sleeping one on Render is
+ * usually not refused but held open by the proxies until it has booted (about 30 s measured), so a
+ * check still pending after this long is reported as waking without waiting for its timeout.
+ */
+export const SLOW_PROBE_MS = 3_000;
 
 export function classifyProbe(error: unknown): ProbeOutcome {
   if (error === null || error === undefined) return "up";
@@ -49,8 +55,10 @@ export interface WakeOptions {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   budgetMs?: number;
-  /** Called on the first failed check: the UI shows "Starting the server…". */
+  /** Called once, on the first failed or slow check: the UI shows "Starting the server…". */
   onWaking?: () => void;
+  /** A check pending this long counts as waking (default SLOW_PROBE_MS). */
+  slowAfterMs?: number;
 }
 
 const defaultProbe = (timeoutMs: number) => apiRequest(HEALTH_PATH, { timeoutMs });
@@ -63,20 +71,30 @@ export async function wake({
   sleep = defaultSleep,
   budgetMs = WAKE_BUDGET_MS,
   onWaking,
+  slowAfterMs = SLOW_PROBE_MS,
 }: WakeOptions = {}): Promise<"up" | "absent" | "down"> {
+  let reportedWaking = false;
+  const reportWaking = () => {
+    if (reportedWaking) return;
+    reportedWaking = true;
+    onWaking?.();
+  };
   const start = now();
   for (let attempt = 0; ; attempt++) {
     const left = budgetMs - (now() - start);
     if (left <= 0) return "down";
     let error: unknown = null;
+    const slow = setTimeout(reportWaking, slowAfterMs);
     try {
       await probe(Math.min(PROBE_TIMEOUT_MS, left));
     } catch (e) {
       error = e;
+    } finally {
+      clearTimeout(slow);
     }
     const outcome = classifyProbe(error);
     if (outcome !== "waking") return outcome;
-    if (attempt === 0) onWaking?.();
+    reportWaking();
     if (now() - start >= budgetMs) return "down";
     await sleep(backoffMs(attempt));
   }

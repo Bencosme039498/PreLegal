@@ -238,11 +238,11 @@ Ticket numbers match the PL project in Jira.
   - `StructuredLlm.prepare()` (LiteLLM: wait for the import) runs in `/api/chat` before the `Budget` starts.
   - `CHAT_TIMEOUT_MS` is 110 s (`lib/chat.ts`).
 - **`ApiPathMiddleware`** (`main.py`), for `/api/*` only:
-  - strips a trailing slash, because Vercel's `trailingSlash` redirect can come before the rewrite;
+  - strips a trailing slash: on Vercel the `trailingSlash` redirect (308) runs before the rewrite, so every API call arrives as `/api/x/`. That is also why the rewrite source is `/api/(.*)`: `/api/:path*` doesn't match the slash, and with it the preview served the static 404 (found in the end-to-end run);
   - sets `Cache-Control: no-store`, because Vercel caches external rewrites when headers allow it.
 - **Frontend cold starts** (`lib/backend.ts`, framework-free):
   - The status is `checking | waking | up | absent | down`. `classifyProbe` makes only a plain 404/405 mean "absent" (demo mode); timeouts, network errors, 5xx and an HTML 200 (Render's loading page) mean "waking".
-  - `wake()` retries `/api/health` with backoff (1/2/4/5 s) for up to 150 s (`WAKE_BUDGET_MS`), each probe at most 20 s, then reports "down".
+  - `wake()` reports waking when a check fails or is still pending after 3 s (`SLOW_PROBE_MS`; a sleeping Render instance is held open, not refused), and retries `/api/health` with backoff (1/2/4/5 s) for up to 150 s (`WAKE_BUDGET_MS`), each probe at most 20 s, then reports "down".
   - The shared store dedups checks. `markBackendAnswered` runs on every JSON/204 answer through `api-client` `setApiHooks({beforeRequest, onBackendResponse})`.
   - `ensureAwake` (the `beforeRequest` hook) re-wakes after 10 quiet minutes (`AWAKE_FOR_MS`); Render sleeps at 15. `apiRequest` checks `signal.aborted` after the hook.
 - **Frontend components**:
@@ -263,7 +263,7 @@ Ticket numbers match the PL project in Jira.
   - the template validator.
 - **Tests**:
   - pytest: 252 passed plus 1 skipped on SQLite, 253 on PostgreSQL 17. They cover persistence across restarts, isolation, the reset policy, `DATABASE_URL` parsing and secrecy, schema versions, rollback, cascade, case-insensitive emails, no idle PostgreSQL connections, lazy LiteLLM, prepare-before-budget, trailing slashes and `no-store`.
-  - Vitest: 153, covering `backend.test.ts` (classify, wake/backoff/budget, shared status, `ensureAwake`) and the `api-client` hooks.
+  - Vitest: 155, covering `backend.test.ts` (classify, wake/backoff/budget, slow first check, shared status, `ensureAwake`) and the `api-client` hooks.
 - **Verified**:
   - **Docker at Render Free's limits** (`--cpus=0.1 --memory=512m`, PostgreSQL via `DATABASE_URL`):
     - healthy in 21 s, then 18 s on a redeploy;
@@ -277,6 +277,14 @@ Ticket numbers match the PL project in Jira.
     - the home chat explains a lease and opens a Promissory Note;
     - the NDA completes by chat;
     - demo mode still appears on a plain static host.
+  - **End to end on the PR #14 Vercel preview** (Vercel Hobby → Render Free → Neon Free, real OpenAI; the preview is behind Vercel Authentication, reached with `vercel curl` and agent-browser plus the OIDC header):
+    - found and fixed: the rewrite never matched (trailing-slash redirect, see above), and a cold start showed "Loading…" until the first check timed out (now `SLOW_PROBE_MS`);
+    - sign-up, a wrong password refused, sign-out (then 401), sign-in; the cookie is `HttpOnly; Secure; SameSite=lax`;
+    - the home chat opened the Mutual NDA, which was complete after three messages; the PDF (print) has every value and the disclaimer;
+    - a second user gets 404 on GET/PUT/DELETE of the first user's document, an empty list, and 409 for the same email in other case;
+    - cold start after 17.5 idle minutes: about 30 s, with the first health check held open by the proxies (no 5xx or HTML page seen);
+    - after waking in a new container, the account, the document and its chat were still there, and the first chat turn worked;
+    - Vercel team plan `hobby` with no environment variables; Render spun down when idle (a Free instance).
 
 ### To do (PL-1) — Simple website describing the PreLegal company
 
@@ -307,7 +315,6 @@ Ticket numbers match the PL project in Jira.
   - a bad API key returns `llm_not_configured`, and the key never appears in the logs.
 - **Not verified**:
   - the mac/linux scripts on a real machine;
-  - the real Render Free + Neon + Vercel rewrite end to end (pending the accounts): Render's actual cold-start time and loading-page status code, and whether Vercel's trailing-slash redirect runs before the rewrite (handled either way).
 - **Known quirks**:
   - Locally, port 8000 is often taken by another container (`pm-mvp-api`); use `PRELEGAL_PORT=8001`.
   - pytest prints a Starlette deprecation warning about `httpx`; the fix is to switch the dev dependency to `httpx2`.

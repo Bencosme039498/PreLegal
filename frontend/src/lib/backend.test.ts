@@ -100,6 +100,38 @@ describe("wake", () => {
     expect(onWaking).toHaveBeenCalledTimes(1);
   });
 
+  it("reports waking while a first check is held open by a sleeping host, before its timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      let answer!: () => void;
+      const probe = vi.fn(() => new Promise<void>((resolve) => (answer = resolve)));
+      const onWaking = vi.fn();
+      const result = wake({ probe, onWaking, slowAfterMs: 3000 });
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(onWaking).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onWaking).toHaveBeenCalledTimes(1);
+      answer(); // the backend has booted and answers the same check
+      await expect(result).resolves.toBe("up");
+      expect(onWaking).toHaveBeenCalledTimes(1);
+      expect(probe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't report waking later for a check that answered quickly", async () => {
+    vi.useFakeTimers();
+    try {
+      const onWaking = vi.fn();
+      await expect(wake({ probe: probeFailing(0), onWaking, slowAfterMs: 3000 })).resolves.toBe("up");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onWaking).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops at once for a static host", async () => {
     const probe = probeFailing(99, new ApiUnavailableError("HTTP 404", 404));
     await expect(wake({ probe, ...fakeTime() })).resolves.toBe("absent");
