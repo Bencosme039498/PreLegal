@@ -282,8 +282,8 @@ Ticket numbers match the PL project in Jira.
     - sign-up, a wrong password refused, sign-out (then 401), sign-in; the cookie is `HttpOnly; Secure; SameSite=lax`;
     - the home chat opened the Mutual NDA, which was complete after three messages; the PDF (print) has every value and the disclaimer;
     - a second user gets 404 on GET/PUT/DELETE of the first user's document, an empty list, and 409 for the same email in other case;
-    - cold start after 17.5 idle minutes: about 30 s, with the first health check held open by the proxies (no 5xx or HTML page seen);
-    - after waking in a new container, the account, the document and its chat were still there, and the first chat turn worked;
+    - cold starts after 17.5 idle minutes: about 30 s and 24 s. The proxies held the first health check open (no 5xx or HTML page seen); with `SLOW_PROBE_MS` the notice shows within 3 s and the form stays usable;
+    - after waking in a new container and after a Render redeploy, both accounts, their sessions, the documents and the chat history were still there, and the first chat turn after a cold start worked;
     - Vercel team plan `hobby` with no environment variables; Render spun down when idle (a Free instance).
 
 ### To do (PL-1) — Simple website describing the PreLegal company
