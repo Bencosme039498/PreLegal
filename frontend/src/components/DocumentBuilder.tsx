@@ -22,7 +22,8 @@ import { SaveIndicator } from "./SaveIndicator";
 import { useSession } from "./session/useSession";
 import { Disclaimer } from "./ui/Disclaimer";
 import { buttonClass } from "./ui/button";
-import { useChatAvailability } from "./useChatAvailability";
+import { BackendNotice } from "./BackendNotice";
+import { useBackendReady } from "./useBackendStatus";
 import { useDocumentAutosave } from "./useDocumentAutosave";
 
 interface DocumentBuilderProps {
@@ -58,11 +59,13 @@ export function DocumentBuilder({ name, body, sections, templateId, draft, onNew
   const [messages, setMessages] = useState<ChatMessage[]>(() => draft?.messages ?? []);
   /** The conversation started on the home page (it keeps the home greeting). */
   const fromHome = draft?.fromHome ?? false;
-  // The assistant needs the backend: on a static-only host (Vercel, next dev) fall back to the form.
-  const availability = useChatAvailability();
+  // The assistant needs the backend: without one (static hosting, next dev) fall back to the form.
+  // While a sleeping backend wakes up, say so; if it doesn't, offer the form until it does.
+  const { status: backend, ready: backendReady } = useBackendReady();
   /** The user chose to fill in the form by hand instead of chatting. */
   const [manual, setManual] = useState(false);
-  const editor = availability === "checking" ? "checking" : availability === "available" && !manual ? "chat" : "form";
+  const editor =
+    backendReady && !manual ? "chat" : manual || backend === "absent" || backend === "down" ? "form" : "waiting";
 
   const markdown = useMemo(() => fillTemplate(body, fields, values), [body, fields, values]);
   const incomplete = incompleteFields(fields, values);
@@ -133,11 +136,14 @@ export function DocumentBuilder({ name, body, sections, templateId, draft, onNew
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] print:block">
       <div className={editor === "chat" ? "lg:sticky lg:top-24 lg:self-start print:hidden" : "print:hidden"}>
-        {editor === "checking" && (
-          <p role="status" className="py-12 text-center text-sm text-stone-500">
-            Connecting to the drafting assistant…
-          </p>
-        )}
+        {editor === "waiting" &&
+          (backend === "waking" ? (
+            <BackendNotice status={backend} />
+          ) : (
+            <p role="status" className="py-12 text-center text-sm text-stone-500">
+              Connecting to the drafting assistant…
+            </p>
+          ))}
         {editor === "chat" && (
           <ChatPanel
             templateId={templateId}
@@ -154,8 +160,11 @@ export function DocumentBuilder({ name, body, sections, templateId, draft, onNew
         )}
         {editor === "form" && (
           <>
+            {backend === "down" && !manual ? (
+              <BackendNotice status={backend} className="mb-4" />
+            ) : (
             <p className="mb-4 rounded-lg border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-sm text-stone-700">
-              {availability === "available" ? (
+              {backendReady ? (
                 <>
                   You&apos;re filling in the form by hand.{" "}
                   <button
@@ -170,6 +179,7 @@ export function DocumentBuilder({ name, body, sections, templateId, draft, onNew
                 "The AI drafting assistant isn't available here, so fill in the form instead."
               )}
             </p>
+            )}
             <FormEditor sections={sections} values={values} onChange={setValue} />
           </>
         )}

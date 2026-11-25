@@ -6,12 +6,14 @@ import { HOME_CHAT, chatStorageKey, clearChat, greeting, loadChat, planHandoff, 
 import type { FieldValues } from "@/lib/fill-template";
 import { ChatPanel } from "./ChatPanel";
 import { useSession } from "./session/useSession";
-import { useChatAvailability } from "./useChatAvailability";
+import { BackendNotice } from "./BackendNotice";
+import { useBackendReady } from "./useBackendStatus";
 
 /**
  * Home page chat: the AI finds out which document the user needs (or explains it can't generate
  * one and offers the closest), then opens that document's page with the conversation so far.
- * Renders nothing without a backend (static hosting): the template grid below still works.
+ * Renders nothing without a backend (static hosting): the template grid below still works. While a
+ * sleeping backend wakes up it says so instead.
  */
 export function HomeChat() {
   const { user } = useSession();
@@ -20,13 +22,13 @@ export function HomeChat() {
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     storageKey ? (loadChat(storageKey, [])?.messages ?? []) : [],
   );
-  const available = useChatAvailability() === "available";
+  const { status, ready } = useBackendReady();
 
   useEffect(() => {
     if (storageKey) saveChat(storageKey, { messages, values: {} });
   }, [storageKey, messages]);
 
-  if (!available || !user || !storageKey) return null;
+  if (!user || !storageKey || status === "absent" || (!ready && status === "checking")) return null;
 
   const openDocument = (templateId: string, conversation: ChatMessage[], values: FieldValues) => {
     const handoff = planHandoff(user.email, templateId, conversation, values, true);
@@ -40,6 +42,9 @@ export function HomeChat() {
       <h2 id="home-chat-title" className="mb-3 font-serif text-xl font-semibold text-brand-navy">
         What do you need to draft?
       </h2>
+      {!ready ? (
+        <BackendNotice status={status} />
+      ) : (
       <ChatPanel
         templateId={null}
         greetingText={greeting()}
@@ -50,6 +55,7 @@ export function HomeChat() {
         noFormHint="You can still pick a document below."
         className="h-[26rem]"
       />
+      )}
     </section>
   );
 }

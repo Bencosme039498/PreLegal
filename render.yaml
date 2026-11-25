@@ -1,39 +1,34 @@
 # Render Blueprint for the PreLegal backend (https://render.com/docs/blueprint-spec).
 #
-# One Docker web service built from the repo's Dockerfile, with a persistent disk for the SQLite
-# database. The public entry point is the Vercel site, which rewrites /api/* to this service
-# (frontend/vercel.json). Cost: the 0.5c-512mb instance ($7/month) plus the 1 GB disk
-# ($0.25/month) on the free Hobby workspace. Free instances can't have a disk and sleep when idle.
+# One Docker web service on Render's Free instance ($0), built from the repo's Dockerfile. The data
+# lives in PostgreSQL on Neon Free ($0), reached through DATABASE_URL. The public entry point is the
+# Vercel site (Hobby, $0), which rewrites /api/* to this service (frontend/vercel.json). The only
+# paid service is OpenAI API usage.
+#
+# Free instance limits (Render, November 2026): 0.1 CPU / 512 MB, 750 instance hours a month per
+# workspace, sleeps after 15 minutes without traffic and takes about a minute to wake (the frontend
+# shows "Starting the server…" meanwhile), ephemeral filesystem, may be restarted at any time.
 services:
   - type: web
     name: prelegal-api
     runtime: docker
-    plan: 0.5c-512mb
-    region: oregon
+    plan: free
+    region: oregon # next to Neon's AWS us-west-2 (Oregon)
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
     # Deploys each push to the Blueprint's branch (main in production) once its GitHub checks
-    # (.github/workflows/ci.yml) have passed. Never deploy a commit from before PL-10: that code
-    # deletes the database on every start.
+    # (.github/workflows/ci.yml) have passed.
     autoDeployTrigger: checksPass
-    # A disk means one instance and a short restart on each deploy (no zero-downtime deploys).
-    # Render snapshots it daily and keeps the snapshots for 7 days.
-    disk:
-      name: prelegal-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
-      # Secret: entered in the Render dashboard when the Blueprint is created, never committed.
+      # Secrets: entered in the Render dashboard when the Blueprint is created, never committed.
       - key: OPENAI_API_KEY
+        sync: false
+      # Neon's pooled connection string (host ending in -pooler), with sslmode=require.
+      - key: DATABASE_URL
         sync: false
       - key: OPENAI_MODEL
         value: gpt-4.1-mini
-      # The database lives on the disk and is kept across restarts and deploys.
-      - key: PRELEGAL_DB_PATH
-        value: /var/data/prelegal.db
-      - key: PRELEGAL_DB_RESET
-        value: "false"
       # Browsers reach the API over HTTPS (Vercel), so the session cookie is HTTPS-only.
       - key: PRELEGAL_COOKIE_SECURE
         value: "true"

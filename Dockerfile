@@ -24,18 +24,16 @@ COPY backend/app ./app
 COPY data/templates ./data/templates
 COPY --from=frontend /build/frontend/out ./static
 
-# PRELEGAL_DB_PATH defaults to a file inside the container (local runs, where the start scripts
-# also set PRELEGAL_DB_RESET=true). Production points it at a persistent disk (see render.yaml).
+# The database: PostgreSQL when DATABASE_URL is set (production, see render.yaml), otherwise a
+# SQLite file inside the container (local runs, where the start scripts set PRELEGAL_DB_RESET=true).
 ENV PATH="/app/.venv/bin:$PATH" \
     PRELEGAL_STATIC_DIR=/app/static \
     PRELEGAL_DB_PATH=/tmp/prelegal.db \
     PRELEGAL_TEMPLATES_DIR=/app/data/templates \
     LITELLM_LOCAL_MODEL_COST_MAP=True
-# Non-root user: entrypoint.sh starts as root only to make the database directory writable, then
-# runs the server as "app". The app writes nothing but the database, so /app stays root-owned.
+# Non-root user; the app writes nothing but the local SQLite file under /tmp, so /app stays root-owned.
 RUN useradd --system --no-create-home app
-COPY --chmod=755 backend/entrypoint.sh /usr/local/bin/entrypoint.sh
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+USER app
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]

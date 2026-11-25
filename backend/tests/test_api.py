@@ -1,16 +1,13 @@
-import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
 
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from tests.conftest import PASSWORD
+from tests.conftest import PASSWORD, rows
 
 
 def user_rows(settings: Settings) -> list[tuple]:
-    with closing(sqlite3.connect(settings.db_path)) as conn:
-        return conn.execute("SELECT id, name, email FROM users ORDER BY id").fetchall()
+    return rows(settings, "SELECT id, name, email FROM users ORDER BY id")
 
 
 def test_health(client: TestClient) -> None:

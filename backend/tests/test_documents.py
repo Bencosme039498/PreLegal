@@ -174,7 +174,8 @@ def test_saved_documents_are_capped_per_user(settings: Settings, fake_llm: FakeL
     db_path = settings.db_path.with_name("capped.db")
     capped = settings.model_copy(update={"max_documents_per_user": 2, "db_path": db_path})
     with TestClient(create_app(capped, llm=fake_llm)) as client:
-        sign_up(client)
+        # Not Jane: on PostgreSQL this app shares the database the autouse fixture signed her up in.
+        sign_up(client, email="capped@example.com", name="Capped User")
         create(client)
         create(client)
         res = client.post("/api/documents", json={"template_id": "mutual-nda"})

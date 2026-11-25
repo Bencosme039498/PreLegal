@@ -14,7 +14,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import api, auth, db, documents
 from .config import Settings
-from .llm import LiteLlmClient, StructuredLlm
+from .llm import LiteLlmClient, StructuredLlm, preload_litellm
 from .ratelimit import RateLimiter
 from .templates import load_catalog
 
@@ -64,12 +64,20 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        db.init_database(settings.db_path, reset=settings.db_reset)
+        database.init(reset=settings.db_reset)
         if settings.db_reset:
             logger.warning(
                 "PRELEGAL_DB_RESET is on: the database at %s was recreated empty", settings.db_path
             )
-        yield
+        logger.info("Database: %s", database.kind)
+        if llm is None:
+            # Loading LiteLLM takes most of a cold start on a small instance: do it in the
+            # background, so health checks, sign-in and documents answer in the meantime.
+            preload_litellm()
+        try:
+            yield
+        finally:
+            database.close()
 
     app = FastAPI(
         title="PreLegal",
@@ -81,6 +89,7 @@ def create_app(
     )
     app.add_middleware(ApiPathMiddleware)
     app.state.settings = settings
+    app.state.database = database = db.open_database(settings)
     app.state.catalog = load_catalog(settings.templates_dir)  # fails fast if the dataset is missing
     app.state.llm = llm or LiteLlmClient(timeout=settings.llm_timeout_s, max_retries=settings.llm_max_retries)
     app.state.clock = clock

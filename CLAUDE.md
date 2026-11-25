@@ -8,7 +8,7 @@ The target document set is the CommonPaper catalog in the root `catalog.json`, i
 
 @catalog.json
 
-The current implementation is the V1 technical foundation (PL-6), AI chat for every template (PL-7, PL-8), and accounts with saved documents (PL-9): a creator for the 8 templates in `data/templates/catalog.json` (Next.js static export) served by a FastAPI backend with a SQLite database, packaged in Docker. In production (PL-10) Vercel serves the frontend at https://prelegal-blue.vercel.app and rewrites `/api/*` to the same Docker image on Render, whose database persists on a disk. Users sign up and sign in (password, HttpOnly session cookie), and every draft autosaves to their "My documents". Documents are chosen and filled in by chatting with an AI assistant (OpenAI via LiteLLM). Without a backend (static hosting) there are no accounts: a labelled demo sign-in opens the form, and nothing is saved. See Implementation Status below.
+The current implementation is the V1 technical foundation (PL-6), AI chat for every template (PL-7, PL-8), and accounts with saved documents (PL-9): a creator for the 8 templates in `data/templates/catalog.json` (Next.js static export) served by a FastAPI backend, packaged in Docker, with SQLite locally and PostgreSQL in production. In production (PL-10), at zero fixed cost, Vercel Hobby serves the frontend at https://prelegal-blue.vercel.app and rewrites `/api/*` to the same Docker image on Render Free; the data lives in PostgreSQL on Neon Free. The frontend shows a "waking up" state while the free backend starts from sleep. Users sign up and sign in (password, HttpOnly session cookie), and every draft autosaves to their "My documents". Documents are chosen and filled in by chatting with an AI assistant (OpenAI via LiteLLM). Without a backend (static hosting) there are no accounts: a labelled demo sign-in opens the form, and nothing is saved. See Implementation Status below.
 
 Note: the CommonPaper template files listed in the root `catalog.json` (e.g. `Mutual-NDA.md`) are not in the repo yet. The app uses its own dataset in `data/templates/` (8 templates with its own `catalog.json` and `catalog.schema.json`); the frontend reads it at build time.
 
@@ -46,12 +46,14 @@ The start scripts pass `.env` to the container at run time (`--env-file`); it is
 
 Optional backend/script variables (defaults are fine for Docker):
 - `PRELEGAL_PORT` - host port used by the start scripts (default `8000`)
-- `PRELEGAL_DB_PATH` - SQLite file (default `prelegal.db`; `/tmp/prelegal.db` in the container; `/var/data/prelegal.db` on the Render disk)
-- `PRELEGAL_DB_RESET` - `true` deletes and recreates the database on every start (default `false`). Set only by the local start scripts and tests; never in production
+- `DATABASE_URL` (or `PRELEGAL_DATABASE_URL`) - PostgreSQL connection string; set means PostgreSQL (production: Neon's pooled `-pooler` host, `sslmode=require`), unset means SQLite. A `SecretStr`, only in the Render dashboard
+- `PRELEGAL_DB_PATH` - SQLite file when `DATABASE_URL` is unset (default `prelegal.db`; `/tmp/prelegal.db` in the container)
+- `PRELEGAL_DB_RESET` - `true` deletes and recreates the SQLite database on every start (default `false`). Set only by the local start scripts; rejected together with `DATABASE_URL`
+- `PRELEGAL_TEST_DATABASE_URL` - tests only: runs the whole pytest suite on that PostgreSQL database (emptied before each test)
 - `PRELEGAL_STATIC_DIR` - frontend export served at `/` (unset = API only; `/app/static` in the container)
 - `PRELEGAL_TEMPLATES_DIR` - template catalog the chat builds its prompt and schema from (default: repo `data/templates`; `/app/data/templates` in the container)
 - `PRELEGAL_LLM_TIMEOUT_S`, `PRELEGAL_LLM_MAX_RETRIES` - per-attempt timeout (default `20`) and retries after a failed attempt (default `1`; the chat retries itself within its budget, the OpenAI client doesn't)
-- `PRELEGAL_CHAT_BUDGET_S` - total time for one `/api/chat` request, which may make two LLM calls (default `50`; must be below the frontend's 60 s timeout, enforced by validation)
+- `PRELEGAL_CHAT_BUDGET_S` - total time for one `/api/chat` request, which may make two LLM calls (default `50`; must be under 60 s, enforced by validation; the frontend waits 110 s, which also covers LiteLLM still loading after a cold start, below Vercel's 120 s proxy limit)
 - `PRELEGAL_SESSION_TTL_S` - how long a sign-in lasts (default 14 days)
 - `PRELEGAL_COOKIE_SECURE` - `true` makes the session cookie HTTPS-only; leave it off for the plain-http Docker scripts (put it in `.env` for an HTTPS deployment)
 - `PRELEGAL_CHAT_RATE_LIMIT`, `PRELEGAL_CHAT_RATE_WINDOW_S` - AI chat turns per user per window (default `30` per `60` s)
@@ -60,15 +62,15 @@ Optional backend/script variables (defaults are fine for Docker):
 - `LITELLM_LOCAL_MODEL_COST_MAP` - `True` (set in `llm.py` and the image) so LiteLLM doesn't fetch its model map at import
 - Production only (`render.yaml`): `PORT=8000` (the port Render routes to) and `FORWARDED_ALLOW_IPS=*` (uvicorn takes the client address from `X-Forwarded-For`, which Vercel sets, so rate limits see each visitor)
 
-Vercel needs no environment variables: the frontend is a static export and reads none. `OPENAI_API_KEY` lives only in the Render dashboard (and the local `.env`).
+Vercel needs no environment variables: the frontend is a static export and reads none. `OPENAI_API_KEY` and `DATABASE_URL` live only in the Render dashboard (the key also in the local `.env`). OpenAI usage is the only paid service: never activate paid infrastructure (see README "Costs and free-tier limits").
 
 ## Technical design
 
 The entire project should be packaged into a Docker container.  
 The backend should be in backend/ and be a uv project, using FastAPI.  
 The frontend should be in frontend/  
-The database should use SQLite, allowing for a users table with sign up and sign in (done in PL-9: `users`, `sessions` and `documents` tables). Database reset policy (PL-10): production keeps the database across restarts and deploys; the local start scripts (`PRELEGAL_DB_RESET=true`) and tests create it from scratch each time.  
-Production (PL-10): the backend image runs on Render (`render.yaml`, persistent disk) behind a Vercel rewrite (`frontend/vercel.json`); see README "Deployment".  
+The database is SQLite locally and PostgreSQL in production (PL-10), with a users table for sign up and sign in (done in PL-9: `users`, `sessions` and `documents` tables). Database reset policy (PL-10): production (PostgreSQL) keeps its data across restarts and deploys, and the app can't reset it; the local start scripts (`PRELEGAL_DB_RESET=true`) and tests create a fresh database each time.  
+Production (PL-10): free tiers only. The backend image runs on Render Free (`render.yaml`) behind a Vercel rewrite (`frontend/vercel.json`), with PostgreSQL on Neon Free; see README "Deployment".  
 The frontend is statically built (Next.js `output: "export"`) and served by FastAPI.  
 There should be scripts in scripts/ for:  
 ```bash
@@ -220,36 +222,61 @@ Ticket numbers match the PL project in Jira.
   - a cleared cookie sends the user to sign in; delete works;
   - demo mode on a static server: demo sign-in, no My documents, the form works.
 
-### Completed (PL-10) — Deploy the backend to Render behind the Vercel frontend
-- **Architecture**: browser → Vercel (`prelegal-blue.vercel.app`, static export) → `/api/*` rewrite (`frontend/vercel.json`) → Render web service `prelegal-api` (this Dockerfile) → OpenAI. Same origin for the browser, so the `SameSite=Lax` cookie and the frontend are unchanged (no CORS, no API URL variable).
-- **Persistence**: `db.init_database(path, reset=)` replaces `reset_database`. The schema uses `IF NOT EXISTS`, and `PRAGMA user_version` is stamped with `SCHEMA_VERSION` (1). Another version raises `SchemaVersionError`, so a schema change needs a migration. `Settings.db_reset` (`PRELEGAL_DB_RESET`) defaults to `false`; the start scripts pass `-e PRELEGAL_DB_RESET=true`.
-- **Never deploy or roll back Render to a pre-PL-10 commit**: that code deletes the database on start.
+### Completed (PL-10) — Deploy the backend for free (Render Free + Neon Free) behind the Vercel frontend
+- **Cost**: zero fixed cost; OpenAI usage is the only paid service. A first version used a paid Render instance plus a disk (SQLite); the user rejected it, so the design moved to free tiers.
+- **Architecture**: browser → Vercel Hobby (static export) → `/api/*` rewrite (`frontend/vercel.json`) → Render Free web service `prelegal-api` (this Dockerfile) → Neon Free PostgreSQL 17 (+ OpenAI).
+  - The browser sees one origin, so the `SameSite=Lax` cookie needs no CORS and no API URL variable.
+- **Database layer** (`db.py`):
+  - `open_database(settings)` returns `PostgresDatabase` when `DATABASE_URL` is set, otherwise `SqliteDatabase(db_path)`. It lives on `app.state.database`; `deps.get_db` yields a `db.Conn`.
+  - Shared queries use `?` placeholders (`Conn` translates them to `%s` for psycopg), `RETURNING`, `ON CONFLICT DO NOTHING`, timestamps from Python, `COUNT(*) AS n`, and rows read by column name. Only the table definitions differ.
+  - Emails are unique case-insensitively through a `lower(email)` index. `create_user` uses `ON CONFLICT DO NOTHING`, because a failed INSERT would abort a PostgreSQL transaction.
+  - A `schema_version` table holds `SCHEMA_VERSION` (1); another version raises `SchemaVersionError`.
+  - PostgreSQL uses psycopg 3 with `NullConnectionPool` (a connection per request, none held while idle, so Neon scales to zero), `prepare_threshold=None` for PgBouncer, and `dict_row`.
+  - `init(reset=True)` is refused for PostgreSQL, and `Settings` rejects `db_reset` together with `database_url`.
+- **Lazy LiteLLM** (`llm.py`): `load_litellm()` imports litellm once, behind a lock.
+  - The lifespan starts `preload_litellm()` in a daemon thread. Importing it took 52 of the 65 s cold start at 0.1 CPU; the app is now healthy in about 20 s.
+  - `StructuredLlm.prepare()` (LiteLLM: wait for the import) runs in `/api/chat` before the `Budget` starts.
+  - `CHAT_TIMEOUT_MS` is 110 s (`lib/chat.ts`).
 - **`ApiPathMiddleware`** (`main.py`), for `/api/*` only:
-  - strips a trailing slash, because Vercel's `trailingSlash` redirect can come before the rewrite and a FastAPI slash redirect would point at the Render host;
+  - strips a trailing slash, because Vercel's `trailingSlash` redirect can come before the rewrite;
   - sets `Cache-Control: no-store`, because Vercel caches external rewrites when headers allow it.
-- **Container**: `backend/entrypoint.sh` starts as root only to make the database directory writable (a Render disk may be root-owned; it chowns only if `app` can't write), then `setpriv`s to `app`. `USER app` is gone from the Dockerfile; the server still runs as uid 999.
-- **Render** (`render.yaml`):
-  - instance `0.5c-512mb` ($7/month), 1 GB disk at `/var/data` ($0.25/month), Hobby workspace ($0);
-  - `healthCheckPath: /api/health`, `autoDeployTrigger: checksPass`;
-  - `OPENAI_API_KEY` is `sync: false`, entered in the dashboard.
-  - The free instance can't have a disk and sleeps (about 1 minute to wake, more than the 5 s health probe waits).
-  - A disk means one instance and no zero-downtime deploys. Daily snapshots, kept 7 days.
-- **CI**: `.github/workflows/ci.yml` runs backend ruff + pytest, frontend lint + `tsc` + Vitest + build, and the template validator on PRs and pushes to `main`.
-- **Tests**: pytest 242, including:
-  - data, sessions and passwords survive a restart;
-  - users stay isolated after a restart;
-  - reset mode;
-  - env parsing;
-  - idempotent init;
-  - a schema-version mismatch is refused;
-  - trailing-slash API paths;
-  - `no-store`.
-- **Verified in Docker** (production variables, a root-owned volume at `/var/data`):
-  - the user, the document and the session cookie survive `docker restart` and a new container on the same volume;
-  - the server runs as uid 999 and the database file is owned by `app`;
-  - with `X-Forwarded-For`, the per-address sign-in limit is per forwarded IP;
-  - about 205 MB of memory;
-  - local reset mode works.
+- **Frontend cold starts** (`lib/backend.ts`, framework-free):
+  - The status is `checking | waking | up | absent | down`. `classifyProbe` makes only a plain 404/405 mean "absent" (demo mode); timeouts, network errors, 5xx and an HTML 200 (Render's loading page) mean "waking".
+  - `wake()` retries `/api/health` with backoff (1/2/4/5 s) for up to 150 s (`WAKE_BUDGET_MS`), each probe at most 20 s, then reports "down".
+  - The shared store dedups checks. `markBackendAnswered` runs on every JSON/204 answer through `api-client` `setApiHooks({beforeRequest, onBackendResponse})`.
+  - `ensureAwake` (the `beforeRequest` hook) re-wakes after 10 quiet minutes (`AWAKE_FOR_MS`); Render sleeps at 15. `apiRequest` checks `signal.aborted` after the hook.
+- **Frontend components**:
+  - `useBackendStatus` / `useBackendReady` (`ready` = answered once on this page, so a later re-wake doesn't unmount a chat);
+  - `BackendNotice` ("Starting the PreLegal server…" / "isn't responding" + Try again);
+  - `BackendWarmup` in the root layout.
+  - `AuthForm` keeps the form during a wake, with the button showing "Waiting for the server…". `DocumentBuilder` and `HomeChat` show the notice until ready; `ChatPanel`'s bubble says "Starting the server…" while waking.
+  - `useChatAvailability` and `isChatAvailable` are gone.
+  - `AppNav` fits a 390 px phone.
+- **Docker**: `USER app`, no entrypoint (the disk version had one).
+- **`render.yaml`**:
+  - `plan: free`, `region: oregon`, `healthCheckPath: /api/health`, `autoDeployTrigger: checksPass`;
+  - `OPENAI_API_KEY` and `DATABASE_URL` are `sync: false`;
+  - `PRELEGAL_COOKIE_SECURE=true`, `PORT=8000`, `FORWARDED_ALLOW_IPS=*` (uvicorn takes the visitor's address from Vercel's `X-Forwarded-For`).
+- **CI** (`.github/workflows/ci.yml`):
+  - backend ruff + pytest on SQLite, and pytest on a `postgres:17` service;
+  - frontend lint, `tsc`, Vitest, build;
+  - the template validator.
+- **Tests**:
+  - pytest: 252 passed plus 1 skipped on SQLite, 253 on PostgreSQL 17. They cover persistence across restarts, isolation, the reset policy, `DATABASE_URL` parsing and secrecy, schema versions, rollback, cascade, case-insensitive emails, no idle PostgreSQL connections, lazy LiteLLM, prepare-before-budget, trailing slashes and `no-store`.
+  - Vitest: 153, covering `backend.test.ts` (classify, wake/backoff/budget, shared status, `ensureAwake`) and the `api-client` hooks.
+- **Verified**:
+  - **Docker at Render Free's limits** (`--cpus=0.1 --memory=512m`, PostgreSQL via `DATABASE_URL`):
+    - healthy in 21 s, then 18 s on a redeploy;
+    - sign-up while LiteLLM loads;
+    - a real chat turn;
+    - a brand-new container keeps the user, session and document;
+    - another user gets a 404;
+    - 0 idle connections, uid 999, about 225 MB.
+  - **In the browser with agent-browser**, behind a local proxy that answers 503 HTML while "asleep":
+    - the waking notice, a kept form, then sign-up;
+    - the home chat explains a lease and opens a Promissory Note;
+    - the NDA completes by chat;
+    - demo mode still appears on a plain static host.
 
 ### To do (PL-1) — Simple website describing the PreLegal company
 
@@ -267,7 +294,7 @@ Ticket numbers match the PL project in Jira.
 ## Latest update (2026-11-25)
 
 - **PL-9 done**: merged in PR #13 (`d1b95e7`).
-- **PL-10 implemented** on `feature/PL-10-render-backend` (see Completed (PL-10)); PR pending approval. The Render service and the Vercel Git connection are created in their dashboards (README "First-time setup").
+- **PL-10 implemented** on `feature/PL-10-render-backend`, PR #14 (see Completed (PL-10)), pending approval; do not merge without it. The Neon project, the Render Free service and the Vercel Git connection are created in their dashboards (README "First-time setup").
 
 - **PL-6 done**: merged in PR #9 (`bae9788`); Jira status Listo.
 - **PL-7 done**: AI chat for the Mutual NDA (see Completed (PL-7)), merged to `main` in PR #11 (`1cc1142`); Jira status Listo. The CLAUDE.md update from PR #10 was merged with it. Branches `feature/PL-7-ai-chat-mutual-nda` and `docs/claude-md-status` are kept.
@@ -280,7 +307,7 @@ Ticket numbers match the PL project in Jira.
   - a bad API key returns `llm_not_configured`, and the key never appears in the logs.
 - **Not verified**:
   - the mac/linux scripts on a real machine;
-  - the Render deploy and the Vercel rewrite end to end (pending the Render service): the Vercel timeout for a proxied 50 s chat turn, and whether Vercel's trailing-slash redirect runs before the rewrite.
+  - the real Render Free + Neon + Vercel rewrite end to end (pending the accounts): Render's actual cold-start time and loading-page status code, and whether Vercel's trailing-slash redirect runs before the rewrite (handled either way).
 - **Known quirks**:
   - Locally, port 8000 is often taken by another container (`pm-mvp-api`); use `PRELEGAL_PORT=8001`.
   - pytest prints a Starlette deprecation warning about `httpx`; the fix is to switch the dev dependency to `httpx2`.
@@ -291,4 +318,5 @@ Ticket numbers match the PL project in Jira.
   - the same document open in two tabs is last-save-wins;
   - a save whose response is lost (a timeout after the server created it) is retried as a second document;
   - values the AI sends that are too long are dropped without telling the model;
-  - the README screenshots other than the home page still show the form on the static site.
+  - no keep-alive ping (by choice), so the first visit after 15 idle minutes waits for a cold start;
+  - Neon Free can only restore the last 6 hours.

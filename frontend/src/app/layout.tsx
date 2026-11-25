@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { BackendWarmup } from "@/components/BackendNotice";
 import { SiteFooter } from "@/components/SiteFooter";
 import "./globals.css";
 
@@ -26,6 +27,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/* Starts waking the (possibly sleeping) backend as soon as any page loads. */}
+        <BackendWarmup />
         {/* Each layout renders its own <main>: the app pages under the top bar, sign-in pages centred. */}
         {children}
         <SiteFooter />
