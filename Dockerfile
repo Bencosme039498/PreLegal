@@ -24,15 +24,18 @@ COPY backend/app ./app
 COPY data/templates ./data/templates
 COPY --from=frontend /build/frontend/out ./static
 
-# The database lives inside the container and is recreated on every start.
+# PRELEGAL_DB_PATH defaults to a file inside the container (local runs, where the start scripts
+# also set PRELEGAL_DB_RESET=true). Production points it at a persistent disk (see render.yaml).
 ENV PATH="/app/.venv/bin:$PATH" \
     PRELEGAL_STATIC_DIR=/app/static \
     PRELEGAL_DB_PATH=/tmp/prelegal.db \
     PRELEGAL_TEMPLATES_DIR=/app/data/templates \
     LITELLM_LOCAL_MODEL_COST_MAP=True
-# Non-root user; the app only writes the database under /tmp, so /app stays root-owned.
+# Non-root user: entrypoint.sh starts as root only to make the database directory writable, then
+# runs the server as "app". The app writes nothing but the database, so /app stays root-owned.
 RUN useradd --system --no-create-home app
-USER app
+COPY --chmod=755 backend/entrypoint.sh /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]

@@ -1,5 +1,6 @@
 # Builds the PreLegal image and (re)starts the container at http://localhost:8000.
-# Every start gets a fresh temporary database.
+# Every start gets a fresh, empty database (PRELEGAL_DB_RESET=true; production keeps its
+# database, see README "Deployment").
 # Failures are detected through $LASTEXITCODE: with ErrorActionPreference "Stop", Windows
 # PowerShell 5.1 turns docker's progress output on stderr into terminating errors.
 
@@ -22,8 +23,8 @@ if ($LASTEXITCODE -ne 0) { Write-Error "docker build failed."; exit 1 }
 docker rm -f $Container *> $null
 
 # .env (e.g. OPENAI_API_KEY) is passed at run time, never baked into the image.
-$envArgs = @()
-if (Test-Path ".env") { $envArgs = @("--env-file", ".env") }
+$envArgs = @("-e", "PRELEGAL_DB_RESET=true")
+if (Test-Path ".env") { $envArgs += @("--env-file", ".env") }
 
 Write-Host "Starting container '$Container'..."
 docker run -d --name $Container -p "${Port}:8000" @envArgs $Image | Out-Null

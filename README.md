@@ -50,7 +50,7 @@ Sample output: [`sample-mutual-nda.pdf`](docs/screenshots/sample-mutual-nda.pdf)
 
 ## Run locally with Docker
 
-The whole app (frontend + backend + temporary database) runs in one Docker container at **<http://localhost:8000>**. Requires [Docker](https://www.docker.com/) to be running.
+The whole app (frontend + backend + a throwaway database) runs in one Docker container at **<http://localhost:8000>**. Requires [Docker](https://www.docker.com/) to be running.
 
 | OS | Start | Stop |
 | --- | --- | --- |
@@ -62,9 +62,9 @@ The start script builds the image, (re)starts the `prelegal` container and waits
 
 - **Accounts** (PL-9): create an account (name, email, password) at `/signup/`, then sign in at `/login/`. Passwords are hashed with scrypt; the session lives in an HttpOnly cookie for 14 days. Repeated failed sign-ins are slowed down.
 - **My documents**: every draft is saved to your account as you chat or type (Draft / Complete). Reopen one from `/documents/` or the dashboard to keep editing or download it again, or delete it. Downloads (PDF and Markdown) carry a notice that the document is a draft subject to legal review.
-- **The database is temporary**: SQLite inside the container, recreated from scratch every time the container starts, so accounts, sessions and documents are wiped on restart (you'll be asked to sign up again).
+- **The local database is throwaway**: the start scripts set `PRELEGAL_DB_RESET=true`, so the SQLite file inside the container is recreated empty every time the container starts, and accounts, sessions and documents are wiped on restart (you'll be asked to sign up again). Production keeps its database (see [Database reset policy](#database-reset-policy)).
 - A `.env` file in the repository root, if present, is passed to the container at run time (it is never copied into the image). The AI chat needs `OPENAI_API_KEY` there; `OPENAI_MODEL` is optional (default `gpt-4.1-mini`). Without a key the app still runs: the chat reports it isn't configured, and offers the form on a document page (on the home page, the list of documents below it).
-- **AI chat (every template)**: on the home page, describe what you need and the assistant picks the document. If you ask for something PreLegal can't generate (e.g. a lease), it says so and offers the closest document, or lists what it can draft. It then opens the document's page with the conversation so far and keeps asking for what's missing. Mid-conversation you can ask for a different document: once you confirm, it switches and carries over the details that still apply (dates, governing law…). The backend calls OpenAI through LiteLLM with Structured Outputs; every value the AI extracts is validated on the server before it reaches the document. `/api/chat` needs a signed-in user and is rate limited per user (30 turns a minute by default). If the backend isn't reachable (e.g. the static Vercel site), there are no accounts: a labelled demo sign-in opens the form-based editor, and nothing is saved.
+- **AI chat (every template)**: on the home page, describe what you need and the assistant picks the document. If you ask for something PreLegal can't generate (e.g. a lease), it says so and offers the closest document, or lists what it can draft. It then opens the document's page with the conversation so far and keeps asking for what's missing. Mid-conversation you can ask for a different document: once you confirm, it switches and carries over the details that still apply (dates, governing law…). The backend calls OpenAI through LiteLLM with Structured Outputs; every value the AI extracts is validated on the server before it reaches the document. `/api/chat` needs a signed-in user and is rate limited per user (30 turns a minute by default). If the backend isn't reachable (e.g. a static-only deployment, or `npm run dev`), there are no accounts: a labelled demo sign-in opens the form-based editor, and nothing is saved.
 
 ### Architecture
 
@@ -72,9 +72,11 @@ The start script builds the image, (re)starts the `prelegal` container and waits
 Docker image
 ├── build stage (node:24)    frontend/ + data/  ──npm run build──▶  static export (out/)
 └── runtime (python:3.13)    FastAPI (backend/) on :8000, data/templates (chat prompt + schema)
-                               ├── /api/*   JSON API, SQLite at /tmp/prelegal.db, AI chat ──LiteLLM──▶ OpenAI
+                               ├── /api/*   JSON API, SQLite (PRELEGAL_DB_PATH), AI chat ──LiteLLM──▶ OpenAI
                                └── /*       the static export (404.html for unknown pages)
 ```
+
+In production the same image runs on Render, behind the Vercel site (see [Deployment](#deployment)).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -114,12 +116,14 @@ npm test && npm run lint && npm run build
 | `OPENAI_API_KEY` | none | OpenAI key for the AI chat (root `.env`; read by LiteLLM, never logged or sent to the browser) |
 | `OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI model, called as `openai/<model>` |
 | `PRELEGAL_PORT` | `8000` | Host port used by the start scripts |
-| `PRELEGAL_DB_PATH` | `prelegal.db` (`/tmp/prelegal.db` in the image) | Temporary SQLite database |
+| `PRELEGAL_DB_PATH` | `prelegal.db` (`/tmp/prelegal.db` in the image) | SQLite database file (`/var/data/prelegal.db`, on the persistent disk, in production) |
+| `PRELEGAL_DB_RESET` | `false` (`true` in the start scripts) | `true` deletes and recreates the database on every start. Local development and tests only, never in production |
 | `PRELEGAL_STATIC_DIR` | unset (`/app/static` in the image) | Frontend export served at `/`; unset serves the API only |
 | `PRELEGAL_TEMPLATES_DIR` | repo `data/templates` (`/app/data/templates` in the image) | Template catalog the chat builds its prompt and schema from |
 | `PRELEGAL_LLM_TIMEOUT_S` / `PRELEGAL_LLM_MAX_RETRIES` | `20` / `1` | Per-attempt timeout and retries for OpenAI calls |
 | `PRELEGAL_CHAT_BUDGET_S` | `50` | Total time for one chat request, which may make two OpenAI calls (choosing a document, then its first turn). Must stay below the frontend's 60 s timeout (enforced) |
 | `LITELLM_LOCAL_MODEL_COST_MAP` | `True` | Use LiteLLM's bundled model map instead of fetching it at startup |
+| `PORT` / `FORWARDED_ALLOW_IPS` | `8000` / uvicorn's `127.0.0.1` | Production only (set in `render.yaml`): the port Render routes to, and trusting `X-Forwarded-For` so rate limits see each visitor's address |
 
 The Docker image is about 1.1 GB, mostly LiteLLM and its dependencies.
 
@@ -127,35 +131,96 @@ The Docker image is about 1.1 GB, mostly LiteLLM and its dependencies.
 
 | Path | Description |
 | --- | --- |
-| [`backend`](backend) | FastAPI app (uv project): the API, the temporary SQLite database, and serving the frontend build |
+| [`backend`](backend) | FastAPI app (uv project): the API, the SQLite database, and serving the frontend build; `entrypoint.sh` for the container |
 | [`docs/screenshots`](docs/screenshots) | Screenshots of the app and a sample PDF |
 | [`data/templates`](data/templates) | Dataset of legal document templates and their field catalog |
 | [`frontend`](frontend) | Next.js app (static export): sign-in, the AI chat (home page and every template) with the form as fallback. See [frontend/README.md](frontend/README.md) |
 | [`scripts`](scripts) | Start/stop scripts for macOS, Linux and Windows, and `validate-templates.mjs` |
-| [`Dockerfile`](Dockerfile) | Multi-stage build of the whole app |
+| [`Dockerfile`](Dockerfile) | Multi-stage build of the whole app (used locally and on Render) |
+| [`render.yaml`](render.yaml) | Render Blueprint for the production backend |
+| [`frontend/vercel.json`](frontend/vercel.json) | Vercel rewrite of `/api/*` to the Render backend |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Tests on every pull request and push to `main` (Render deploys only after they pass) |
+
 
 ## Deployment
 
-The frontend is deployed on [Vercel](https://vercel.com) as the project **`prelegal`**: <https://prelegal-blue.vercel.app>
+Production is two services. Visitors only ever see the Vercel URL:
 
-Project settings (already configured):
+```
+browser ──HTTPS──▶ Vercel  https://prelegal-blue.vercel.app      (project "prelegal", static export)
+                     ├── /*       the static frontend
+                     └── /api/*   rewrite (frontend/vercel.json) ──HTTPS──▶ Render  prelegal-api
+                                                                             FastAPI (this Dockerfile)
+                                                                             SQLite on a 1 GB disk at /var/data
+                                                                             OPENAI_API_KEY ──▶ OpenAI
+```
+
+- **Same origin for the browser.** The rewrite proxies `/api/*` on the Vercel domain, so the HttpOnly `SameSite=Lax` session cookie is a first-party cookie and there is no CORS. The frontend needs no API URL or environment variable.
+- **Secrets only on Render.** `OPENAI_API_KEY` is set in the Render dashboard and nowhere else. The Vercel project needs no environment variables at all: its build is a static export and never reads one.
+- **Persistent database.** SQLite lives on a Render persistent disk, so accounts, sessions, conversations and documents survive restarts and deploys. Render snapshots the disk every 24 hours and keeps snapshots for 7 days.
+- **Automatic deploys from GitHub.** Pull requests and pushes to `main` run [CI](.github/workflows/ci.yml). Render deploys `main` once those checks pass (`autoDeployTrigger: checksPass`). Vercel deploys `main` to production and gives pull requests preview URLs (once its Git connection is set up, below). Preview deployments also rewrite to the production backend, so they use production accounts.
+- **Behind proxies.** API responses carry `Cache-Control: no-store`, so Vercel never caches them. `/api/x/` is accepted as `/api/x`, because the export's `trailingSlash: true` can make Vercel redirect before proxying. uvicorn takes the visitor's address from `X-Forwarded-For` (`FORWARDED_ALLOW_IPS=*`), which Vercel sets, for the per-address rate limits.
+
+### Costs
+
+| Service | Plan | Monthly cost |
+| --- | --- | --- |
+| Render workspace | Hobby | $0 |
+| Render web service | `0.5c-512mb` instance (0.5 CPU, 512 MB; the container uses about 200 MB) | $7 |
+| Render persistent disk | 1 GB SSD ($0.25 per GB) | $0.25 |
+| Vercel | Hobby | $0 |
+| GitHub Actions | Free minutes | $0 |
+| OpenAI | `gpt-4.1-mini`, pay per token | usage only |
+
+That's **about $7.25 a month** plus OpenAI usage (prices as published by Render in November 2026). Render's free instance is not an option: it can't have a disk, and it sleeps after 15 minutes idle and takes about a minute to wake, longer than the frontend waits before falling back to demo mode.
+
+### Database reset policy
+
+| Where | `PRELEGAL_DB_RESET` | Effect |
+| --- | --- | --- |
+| Production (Render) | `false` | The database at `/var/data/prelegal.db` is created once and then kept |
+| Local Docker scripts | `true` | Fresh empty database on every container start |
+| Tests | per test | Each test gets its own temporary file; tests cover both modes |
+| Not set | `false` | Kept. Resetting is always explicit |
+
+The schema is created with `CREATE TABLE IF NOT EXISTS` and stamped with a version (`PRAGMA user_version`). The app refuses to start on a database from another schema version instead of using tables it doesn't understand, so a future schema change has to ship a migration.
+
+> ⚠️ **Never deploy or roll back the Render service to a commit from before PL-10.** That code deletes the database on every start, and it would wipe production data. To restore data, use a Render disk snapshot.
+
+### First-time setup
+
+**1. Render (backend)**, about 10 minutes, requires the paid instance above:
+
+1. Sign up at [render.com](https://render.com) with GitHub, and give the Render GitHub app access to `Bencosme039498/PreLegal`.
+2. **New → Blueprint**, pick the repository and the branch (`main`; or a pull request's branch to try it before merging, then switch the Blueprint to `main` afterwards). Render reads [`render.yaml`](render.yaml).
+3. When asked, enter `OPENAI_API_KEY`. Every other variable comes from the Blueprint.
+4. Apply. After the first deploy, `https://prelegal-api.onrender.com/api/health` returns `{"status":"ok"}`. If Render gave the service a different URL, put it in [`frontend/vercel.json`](frontend/vercel.json).
+
+**2. Vercel (frontend).** The project settings are already configured:
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| Root Directory | `frontend` | The Next.js app lives there |
+| Root Directory | `frontend` | The Next.js app and `vercel.json` live there |
 | Include source files outside of the Root Directory | Enabled | The app reads `data/templates` at build time |
 | Framework Preset | Next.js | |
 | Node.js Version | 24.x | Next.js 16 and Vitest 5 need Node 22+ |
+| Environment Variables | none | Remove any `OPENAI_*` variables: the key belongs on Render only |
 
-To deploy from a local checkout (run from the **repository root**, not `frontend/`, so `data/templates` is uploaded too):
+To connect automatic deploys, add GitHub as a login connection in Vercel (Account Settings → Authentication), then run `npx vercel git connect --project prelegal` and `npx vercel project update prelegal --git-branch main`. After that, pushes to `main` deploy to production and pull requests get preview URLs.
+
+To deploy by hand instead (from the **repository root**, not `frontend/`, so `data/templates` is uploaded too):
 
 ```sh
-npx vercel login                       # once
+npx vercel login                          # once
 npx vercel link --yes --project prelegal  # once; writes .vercel/ (git-ignored)
-npx vercel deploy                      # preview deployment
-npx vercel deploy --prod               # production deployment
+npx vercel deploy                         # preview deployment
+npx vercel deploy --prod                  # production deployment
 ```
 
-The frontend is a static export (`output: "export"`), so the Vercel deployment is fully static and has **no backend**: sign-in still works there but is kept on the visitor's device only. Run the app with Docker (above) for the full stack.
+**3. Check**: on <https://prelegal-blue.vercel.app> the sign-in page no longer says "Demo mode". Sign up, draft a document with the AI chat, then restart the Render service (Manual Deploy → Restart). You should still be signed in, and the document should still be in My documents.
 
-> **Automatic deploys from GitHub** are not connected yet. To enable them, add GitHub as a login connection in Vercel (Account Settings → Authentication), then run `npx vercel git connect --project prelegal` and `npx vercel project update prelegal --git-branch main`. After that, pushes to `main` deploy to production and pull requests get preview URLs.
+### Operating notes
+
+- A deploy restarts the single instance: the API is unavailable for up to a minute (a disk rules out zero-downtime deploys). Rate limits live in memory and reset then; sessions don't.
+- The backend also answers directly at its `onrender.com` URL, which serves the whole app too. Use the Vercel URL. Its session cookie is separate, and direct requests can set their own `X-Forwarded-For`, which weakens only the per-address limits (failed sign-ins are also limited per email).
+- One instance only: SQLite on a disk can't be shared. Scaling out would mean moving to Postgres.

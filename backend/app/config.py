@@ -16,8 +16,10 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="PRELEGAL_", extra="ignore")
 
-    # Temporary database: deleted and recreated every time the app starts.
+    # SQLite database. It persists across restarts (production keeps it on a Render disk); only
+    # with db_reset=True (local Docker scripts, tests) is it deleted and recreated on every start.
     db_path: Path = Path("prelegal.db")
+    db_reset: bool = False
     # Directory with the frontend's static export (frontend/out). None serves the API only.
     static_dir: Path | None = None
     # Template dataset (catalog.json): the AI chat builds its prompt and output schema from it.

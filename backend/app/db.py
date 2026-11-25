@@ -1,4 +1,5 @@
-"""Temporary SQLite database, created from scratch on every start (stdlib sqlite3, no ORM).
+"""The SQLite database (stdlib sqlite3, no ORM). It persists across restarts; with
+`PRELEGAL_DB_RESET=true` (local Docker scripts, tests) it is recreated on every start instead.
 
 Every document query is scoped by user_id: a document id alone never reaches another user's data.
 """
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = """
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     name          TEXT NOT NULL,
     email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -20,14 +21,14 @@ CREATE TABLE users (
 );
 
 -- Sign-in sessions: the cookie holds a random token, the table only its SHA-256.
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     expires_at REAL NOT NULL -- Unix time
 );
 
 -- A user's drafts: the field values and the chat that filled them in (both JSON).
-CREATE TABLE documents (
+CREATE TABLE IF NOT EXISTS documents (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     template_id  TEXT NOT NULL,
@@ -38,16 +39,37 @@ CREATE TABLE documents (
     created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
-CREATE INDEX documents_by_user ON documents (user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS documents_by_user ON documents (user_id, updated_at DESC);
 """
 
 
-def reset_database(path: Path) -> None:
-    """Delete any existing database at `path` and create the schema."""
-    path.unlink(missing_ok=True)
+# Bumped whenever SCHEMA changes; an existing database at another version needs a migration first.
+SCHEMA_VERSION = 1
+
+
+class SchemaVersionError(RuntimeError):
+    """The database file was created for a different schema version."""
+
+
+def init_database(path: Path, *, reset: bool = False) -> None:
+    """Open (or create) the database at `path` and make sure the schema exists.
+
+    reset=True deletes any existing file first (local development and tests only). Otherwise
+    existing data is kept, and a file stamped with another schema version is refused rather than
+    used, so a deploy can never quietly run against tables it doesn't understand.
+    """
+    if reset:
+        path.unlink(missing_ok=True)
     path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(path)) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version not in (0, SCHEMA_VERSION):
+            raise SchemaVersionError(
+                f"{path} has schema version {version}, this code expects {SCHEMA_VERSION}; migrate it first"
+            )
         conn.executescript(SCHEMA)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.commit()
 
 
 @contextmanager
