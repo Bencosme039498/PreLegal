@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { setUnauthenticatedHandler } from "@/lib/api-client";
 import { fetchCurrentUser, forgetUser, saveSession } from "@/lib/session";
-import { useChatAvailability } from "../useChatAvailability";
+import { useBackendStatus } from "../useBackendStatus";
 import { useSession } from "./useSession";
 
 /**
@@ -19,7 +19,7 @@ import { useSession } from "./useSession";
 export function RequireSession({ children }: { children: React.ReactNode }) {
   const { status, user } = useSession();
   const router = useRouter();
-  const availability = useChatAvailability();
+  const backend = useBackendStatus();
 
   useEffect(() => {
     if (status === "anonymous") router.replace("/login/");
@@ -30,8 +30,8 @@ export function RequireSession({ children }: { children: React.ReactNode }) {
 
   // A demo sign-in (made without a backend) isn't an account: sign in properly where there is one.
   useEffect(() => {
-    if (user && !user.persisted && availability === "available") forgetUser(user);
-  }, [user, availability]);
+    if (user && !user.persisted && backend === "up") forgetUser(user);
+  }, [user, backend]);
 
   // Check the cached account against the session cookie.
   useEffect(() => {
@@ -45,7 +45,7 @@ export function RequireSession({ children }: { children: React.ReactNode }) {
         if (current) saveSession(current);
       })
       .catch(() => {
-        // No answer (offline, or the server is restarting): keep the cached user; the next request tells.
+        // No answer (offline, or the server didn't wake up): keep the cached user; the next request tells.
       });
     return () => {
       active = false;

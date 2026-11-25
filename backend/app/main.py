@@ -10,14 +10,47 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import api, auth, db, documents
 from .config import Settings
-from .llm import LiteLlmClient, StructuredLlm
+from .llm import LiteLlmClient, StructuredLlm, preload_litellm
 from .ratelimit import RateLimiter
 from .templates import load_catalog
 
 logger = logging.getLogger(__name__)
+
+
+class ApiPathMiddleware:
+    """Two adjustments for every /api/* request, needed behind the Vercel rewrite.
+
+    - Accepts a trailing slash (/api/health/ is /api/health). The Next.js export uses
+      trailingSlash: true, so Vercel may redirect /api/x to /api/x/ before proxying it here, and a
+      FastAPI slash redirect would point the browser at this server's own host instead.
+    - Marks API responses `Cache-Control: no-store`, so no CDN in front (Vercel caches external
+      rewrites when headers allow it) ever stores a user's session or documents.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if not path.startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        if len(path) > len("/api/") and path.endswith("/"):
+            scope = {**scope, "path": path.rstrip("/")}
+            if scope.get("raw_path"):
+                scope["raw_path"] = scope["raw_path"].rstrip(b"/")
+
+        async def send_no_store(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = [(k, v) for k, v in message.get("headers", []) if k.lower() != b"cache-control"]
+                message = {**message, "headers": [*headers, (b"cache-control", b"no-store")]}
+            await send(message)
+
+        await self.app(scope, receive, send_no_store)
 
 
 def create_app(
@@ -31,8 +64,20 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        db.reset_database(settings.db_path)
-        yield
+        database.init(reset=settings.db_reset)
+        if settings.db_reset:
+            logger.warning(
+                "PRELEGAL_DB_RESET is on: the database at %s was recreated empty", settings.db_path
+            )
+        logger.info("Database: %s", database.kind)
+        if llm is None:
+            # Loading LiteLLM takes most of a cold start on a small instance: do it in the
+            # background, so health checks, sign-in and documents answer in the meantime.
+            preload_litellm()
+        try:
+            yield
+        finally:
+            database.close()
 
     app = FastAPI(
         title="PreLegal",
@@ -42,7 +87,9 @@ def create_app(
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )
+    app.add_middleware(ApiPathMiddleware)
     app.state.settings = settings
+    app.state.database = database = db.open_database(settings)
     app.state.catalog = load_catalog(settings.templates_dir)  # fails fast if the dataset is missing
     app.state.llm = llm or LiteLlmClient(timeout=settings.llm_timeout_s, max_retries=settings.llm_max_retries)
     app.state.clock = clock

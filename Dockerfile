@@ -24,13 +24,14 @@ COPY backend/app ./app
 COPY data/templates ./data/templates
 COPY --from=frontend /build/frontend/out ./static
 
-# The database lives inside the container and is recreated on every start.
+# The database: PostgreSQL when DATABASE_URL is set (production, see render.yaml), otherwise a
+# SQLite file inside the container (local runs, where the start scripts set PRELEGAL_DB_RESET=true).
 ENV PATH="/app/.venv/bin:$PATH" \
     PRELEGAL_STATIC_DIR=/app/static \
     PRELEGAL_DB_PATH=/tmp/prelegal.db \
     PRELEGAL_TEMPLATES_DIR=/app/data/templates \
     LITELLM_LOCAL_MODEL_COST_MAP=True
-# Non-root user; the app only writes the database under /tmp, so /app stays root-owned.
+# Non-root user; the app writes nothing but the local SQLite file under /tmp, so /app stays root-owned.
 RUN useradd --system --no-create-home app
 USER app
 EXPOSE 8000

@@ -8,7 +8,6 @@ import {
   clearChats,
   MAX_SENT_MESSAGES,
   greeting,
-  isChatAvailable,
   loadChat,
   parseStoredChat,
   planHandoff,
@@ -20,7 +19,6 @@ import {
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-const html = (status: number) => new Response("<p>nope</p>", { status, headers: { "Content-Type": "text/html" } });
 const fetchReturning = (res: Response) => vi.fn<typeof fetch>().mockResolvedValue(res);
 
 const user = (content: string): ChatMessage => ({ role: "user", content });
@@ -72,21 +70,6 @@ describe("sendChat", () => {
     );
     expect(error).toBeInstanceOf(ApiError);
     expect(chatFailure(error)).toEqual(detail);
-  });
-});
-
-describe("isChatAvailable", () => {
-  it("is true when the backend answers the health check", async () => {
-    const fetchImpl = fetchReturning(json(200, { status: "ok" }));
-    await expect(isChatAvailable({ fetchImpl })).resolves.toBe(true);
-    expect(fetchImpl.mock.calls[0][0]).toBe("/api/health");
-  });
-
-  it.each([
-    ["a static host 404", () => fetchReturning(html(404))],
-    ["a network failure", () => vi.fn<typeof fetch>().mockRejectedValue(new TypeError("Failed to fetch"))],
-  ])("is false for %s", async (_, makeFetch) => {
-    await expect(isChatAvailable({ fetchImpl: makeFetch() })).resolves.toBe(false);
   });
 });
 

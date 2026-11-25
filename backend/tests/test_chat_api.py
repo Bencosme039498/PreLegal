@@ -130,7 +130,7 @@ def test_unknown_api_paths_near_chat_still_get_the_json_404(client: TestClient) 
 
 @pytest.mark.parametrize("budget_s", [0, 60, 90])
 def test_chat_budget_must_fit_the_frontend_timeout(budget_s: float) -> None:
-    # The frontend aborts after 60 s; the server's budget must end first so its answer arrives.
+    # The budget must leave room in the frontend's 110 s timeout for a cold start's LiteLLM loading.
     with pytest.raises(ValidationError):
         Settings(chat_budget_s=budget_s)
 
@@ -171,3 +171,26 @@ def test_chat_is_rate_limited_per_user(
     clock.advance(settings.chat_rate_window_s)
     client.post("/api/auth/login", json={"email": "jane@example.com", "password": PASSWORD})
     assert client.post("/api/chat", json=chat_body()).status_code == 200
+
+
+def test_loading_the_ai_library_does_not_eat_into_the_chat_budget(
+    settings: Settings, fake_llm: FakeLlm
+) -> None:
+    """After a cold start, /api/chat first waits for LiteLLM to finish loading (llm.prepare); the
+    time budget for the AI calls only starts afterwards."""
+    import time
+
+    from app.main import create_app
+
+    fake_llm.prepare = lambda: time.sleep(1.5)  # type: ignore[method-assign]
+    tight = settings.model_copy(update={"chat_budget_s": 10.0, "llm_timeout_s": 20.0, "llm_max_retries": 0})
+    with TestClient(create_app(tight, llm=fake_llm)) as client:
+        sign_up(client, email="cold@example.com")
+        assert client.post("/api/chat", json=chat_body()).status_code == 200
+    # The whole budget (10 s, minus its 1 s margin) was still there for the call.
+    assert fake_llm.timeouts[0] > 8.5
+
+
+def test_chat_prepares_the_llm_before_calling_it(client: TestClient, fake_llm: FakeLlm) -> None:
+    assert client.post("/api/chat", json=chat_body()).status_code == 200
+    assert fake_llm.prepared == 1 and len(fake_llm.calls) >= 1

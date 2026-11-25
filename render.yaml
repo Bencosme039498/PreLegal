@@ -1,0 +1,42 @@
+# Render Blueprint for the PreLegal backend (https://render.com/docs/blueprint-spec).
+#
+# One Docker web service on Render's Free instance ($0), built from the repo's Dockerfile. The data
+# lives in PostgreSQL on Neon Free ($0), reached through DATABASE_URL. The public entry point is the
+# Vercel site (Hobby, $0), which rewrites /api/* to this service (frontend/vercel.json). The only
+# paid service is OpenAI API usage.
+#
+# Free instance limits (Render, November 2026): 0.1 CPU / 512 MB, 750 instance hours a month per
+# workspace, sleeps after 15 minutes without traffic and takes about a minute to wake (the frontend
+# shows "Starting the server…" meanwhile), ephemeral filesystem, may be restarted at any time.
+services:
+  - type: web
+    name: prelegal-api
+    runtime: docker
+    plan: free
+    region: oregon # next to Neon's AWS us-west-2 (Oregon)
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    # Deploys each push to the Blueprint's branch (main in production) once its GitHub checks
+    # (.github/workflows/ci.yml) have passed.
+    autoDeployTrigger: checksPass
+    envVars:
+      # Secrets: entered in the Render dashboard when the Blueprint is created, never committed.
+      - key: OPENAI_API_KEY
+        sync: false
+      # Neon's pooled connection string (host ending in -pooler), with sslmode=require.
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      # Browsers reach the API over HTTPS (Vercel), so the session cookie is HTTPS-only.
+      - key: PRELEGAL_COOKIE_SECURE
+        value: "true"
+      # The port the Dockerfile's uvicorn listens on.
+      - key: PORT
+        value: "8000"
+      # Requests arrive through Vercel and Render's proxy: let uvicorn take the client address
+      # from X-Forwarded-For (which Vercel sets to the visitor's IP), so the per-address sign-in
+      # limits see each visitor rather than one shared proxy address.
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"

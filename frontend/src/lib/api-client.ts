@@ -14,7 +14,14 @@ export class ApiError extends Error {
  * (e.g. the static Vercel deployment returning an HTML 404/405 for /api/*).
  */
 export class ApiUnavailableError extends Error {
-  constructor(cause?: unknown) {
+  /**
+   * @param status The HTTP status of a non-API response (e.g. 404 from a static host, 502 from a
+   *   proxy while the backend wakes up); undefined for a network failure or timeout.
+   */
+  constructor(
+    cause?: unknown,
+    readonly status?: number,
+  ) {
     super("PreLegal API is unavailable", { cause });
     this.name = "ApiUnavailableError";
   }
@@ -51,6 +58,28 @@ export function setUnauthenticatedHandler(handler: (() => void) | null): () => v
   };
 }
 
+export interface ApiHooks {
+  /**
+   * Awaited before every request except the health check (lib/backend.ts wakes a sleeping backend
+   * here). Must not throw.
+   */
+  beforeRequest?: (path: string) => Promise<void>;
+  /** Called whenever the backend itself answered (a JSON or 204 response, whatever its status). */
+  onBackendResponse?: () => void;
+}
+
+let hooks: ApiHooks = {};
+
+/** Installs the request hooks (lib/backend.ts); returns a function that removes them. */
+export function setApiHooks(next: ApiHooks): () => void {
+  hooks = next;
+  return () => {
+    if (hooks === next) hooks = {};
+  };
+}
+
+export const HEALTH_PATH = "/api/health";
+
 /** AbortSignal.any, with a fallback for browsers without it (Safari < 17.4, Firefox < 124). */
 function anySignal(signals: AbortSignal[]): AbortSignal {
   if (typeof AbortSignal.any === "function") return AbortSignal.any(signals);
@@ -80,6 +109,12 @@ export interface ApiRequestInit extends RequestInit {
  */
 export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, fetchImpl = fetch, headers, signal, ...rest } = init;
+  if (path !== HEALTH_PATH && hooks.beforeRequest) {
+    await hooks.beforeRequest(path);
+    // The caller gave up while the backend was waking up (e.g. Start over): don't send.
+    if (signal?.aborted) throw new ApiUnavailableError(signal.reason);
+  }
+  // The timeout starts once the backend is known to be awake.
   const timeout = AbortSignal.timeout(timeoutMs);
   let res: Response;
   try {
@@ -92,9 +127,10 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
     throw new ApiUnavailableError(error);
   }
 
-  if (res.status === 204) return undefined as T;
   const isJson = res.headers.get("content-type")?.includes("application/json") ?? false;
-  if (!isJson) throw new ApiUnavailableError(`HTTP ${res.status}`);
+  if (res.status === 204 || isJson) hooks.onBackendResponse?.();
+  if (res.status === 204) return undefined as T;
+  if (!isJson) throw new ApiUnavailableError(`HTTP ${res.status}`, res.status);
   let body: unknown;
   try {
     body = await res.json();
@@ -108,6 +144,8 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
     if (res.status === 401 && detail.code === NOT_AUTHENTICATED) onUnauthenticated?.();
     throw new ApiError(res.status, detail);
   }
-  if (res.status === 404 || res.status === 405 || res.status >= 500) throw new ApiUnavailableError(`HTTP ${res.status}`);
+  if (res.status === 404 || res.status === 405 || res.status >= 500) {
+    throw new ApiUnavailableError(`HTTP ${res.status}`, res.status);
+  }
   throw new ApiError(res.status, detail);
 }

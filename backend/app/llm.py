@@ -2,26 +2,52 @@
 
 This is the only module that imports litellm. It translates every provider failure into an
 LlmError carrying the HTTP status, a stable code and a user-facing message.
+
+litellm is imported on first use, not with this module: the import takes most of a cold start on a
+small instance (about 50 s at 0.1 CPU), so the app starts answering first and `preload_litellm`
+loads it in the background.
 """
 
 import logging
 import os
+import threading
 from collections.abc import Callable
+from types import ModuleType
 from typing import Any, Protocol, TypeVar
+
+from pydantic import BaseModel, ValidationError
 
 # Use LiteLLM's bundled model cost map instead of fetching it from GitHub at import time.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
-import litellm  # noqa: E402
-from litellm import completion  # noqa: E402
-from pydantic import BaseModel, ValidationError  # noqa: E402
-
-# Conversations contain names and addresses: keep them out of LiteLLM's logs and exception text.
-litellm.suppress_debug_info = True
-litellm.turn_off_message_logging = True
-litellm.redact_messages_in_exceptions = True
-
 logger = logging.getLogger(__name__)
+
+_litellm: ModuleType | None = None
+_litellm_lock = threading.Lock()
+
+
+def load_litellm() -> ModuleType:
+    """The litellm module, imported and configured once (thread-safe)."""
+    global _litellm
+    with _litellm_lock:
+        if _litellm is None:
+            import litellm
+
+            # Conversations contain names and addresses: keep them out of LiteLLM's logs and
+            # exception text.
+            litellm.suppress_debug_info = True
+            litellm.turn_off_message_logging = True
+            litellm.redact_messages_in_exceptions = True
+            _litellm = litellm
+    return _litellm
+
+
+def preload_litellm() -> threading.Thread:
+    """Starts importing litellm in a background thread, so the first chat turn needn't wait."""
+    thread = threading.Thread(target=load_litellm, name="litellm-preload", daemon=True)
+    thread.start()
+    return thread
+
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -62,6 +88,7 @@ def _bad_response() -> LlmError:
 
 def translate_error(exc: Exception) -> LlmError:
     """Maps a LiteLLM / OpenAI exception to an LlmError (subclasses are checked first)."""
+    litellm = load_litellm()
     if isinstance(exc, litellm.Timeout):
         return LlmError(
             504, "llm_timeout", "The AI assistant took too long to answer. Try again.", retryable=True
@@ -85,6 +112,10 @@ def translate_error(exc: Exception) -> LlmError:
 
 
 class StructuredLlm(Protocol):
+    def prepare(self) -> None:
+        """Blocks until the client can make calls (LiteLLM: until it has been imported)."""
+        ...
+
     def complete(
         self,
         messages: list[dict[str, str]],
@@ -101,11 +132,17 @@ class LiteLlmClient:
     """Calls OpenAI through LiteLLM with a Structured Outputs response_format (a Pydantic model)."""
 
     def __init__(
-        self, *, timeout: float, max_retries: int, completion_fn: Callable[..., Any] = completion
+        self, *, timeout: float, max_retries: int, completion_fn: Callable[..., Any] | None = None
     ) -> None:
         self._timeout = timeout
         self._max_retries = max_retries
         self._completion = completion_fn
+
+    def prepare(self) -> None:
+        # After a cold start the background import (preload_litellm) may still be running: wait
+        # for it here, before the chat's time budget starts, so loading never eats into the AI's time.
+        if self._completion is None:
+            load_litellm()
 
     def complete(
         self,
@@ -117,8 +154,9 @@ class LiteLlmClient:
     ) -> T:
         if not os.getenv("OPENAI_API_KEY"):
             raise _not_configured()
+        completion = self._completion or load_litellm().completion
         try:
-            response = self._completion(
+            response = completion(
                 model=model_name(),
                 messages=messages,
                 response_format=response_model,

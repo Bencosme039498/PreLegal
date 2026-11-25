@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the PreLegal image and (re)starts the container at http://localhost:8000.
-# Shared by start-mac.sh and start-linux.sh. Every start gets a fresh temporary database.
+# Shared by start-mac.sh and start-linux.sh. Every start gets a fresh, empty database
+# (PRELEGAL_DB_RESET=true; production keeps its database, see README "Deployment").
 set -euo pipefail
 
 IMAGE=prelegal
@@ -20,8 +21,8 @@ docker build -t "$IMAGE" .
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 
 # .env (e.g. OPENAI_API_KEY) is passed at run time, never baked into the image.
-env_args=()
-if [ -f .env ]; then env_args=(--env-file .env); fi
+env_args=(-e PRELEGAL_DB_RESET=true)
+if [ -f .env ]; then env_args+=(--env-file .env); fi
 
 echo "Starting container '$CONTAINER'..."
 if ! docker run -d --name "$CONTAINER" -p "$PORT:8000" ${env_args[@]+"${env_args[@]}"} "$IMAGE" >/dev/null; then

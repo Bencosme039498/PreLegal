@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MAX_MESSAGE_CHARS, chatFailure, sendChat, type ChatFailure, type ChatMessage } from "@/lib/chat";
+import { useBackendStatus } from "./useBackendStatus";
 import type { FieldValues } from "@/lib/fill-template";
 import { inputClass } from "./input-styles";
 
@@ -39,6 +40,8 @@ export function ChatPanel(props: ChatPanelProps) {
   const { onNavigate, onUseForm, noFormHint, className = "h-[32rem] lg:h-[calc(100vh-7rem)]" } = props;
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  // A turn after a long idle first wakes the server (lib/backend.ts): say so while it does.
+  const waking = useBackendStatus() === "waking";
   const [failure, setFailure] = useState<ChatFailure | null>(null);
   const request = useRef<AbortController | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -141,7 +144,7 @@ export function ChatPanel(props: ChatPanelProps) {
         ))}
         {pending && (
           <p role="status" className={`${bubble} bg-stone-100 text-stone-500`}>
-            Thinking…
+            {waking ? "Starting the server, which can take up to a minute… then thinking." : "Thinking…"}
           </p>
         )}
         {failure && (

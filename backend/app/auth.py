@@ -9,7 +9,6 @@ import base64
 import hashlib
 import hmac
 import secrets
-import sqlite3
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -68,7 +67,7 @@ def _unauthenticated() -> HTTPException:
     return api_error(401, "not_authenticated", "Your session has ended. Sign in again to continue.")
 
 
-def current_user(request: Request, conn: DbConn, clock: Clock) -> sqlite3.Row:
+def current_user(request: Request, conn: DbConn, clock: Clock) -> db.Row:
     """The user whose session cookie came with the request, or a 401 not_authenticated."""
     token = request.cookies.get(COOKIE_NAME)
     if not token or not token.isascii():
@@ -79,7 +78,7 @@ def current_user(request: Request, conn: DbConn, clock: Clock) -> sqlite3.Row:
     return user
 
 
-CurrentUser = Annotated[sqlite3.Row, Depends(current_user)]
+CurrentUser = Annotated[db.Row, Depends(current_user)]
 
 
 # ---- Routes ----
@@ -87,7 +86,7 @@ CurrentUser = Annotated[sqlite3.Row, Depends(current_user)]
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _user_out(user: sqlite3.Row) -> UserOut:
+def _user_out(user: db.Row) -> UserOut:
     """The public fields of a user row (never its password hash)."""
     return UserOut(id=user["id"], name=user["name"], email=user["email"])
 
@@ -109,9 +108,7 @@ def _check_limits(limiter: RateLimiter, *keys: str) -> None:
         )
 
 
-def _start_session(
-    response: Response, conn: sqlite3.Connection, settings: Settings, now: float, user_id: int
-) -> None:
+def _start_session(response: Response, conn: db.Conn, settings: Settings, now: float, user_id: int) -> None:
     token = secrets.token_urlsafe(32)
     db.create_session(
         conn, token_hash=hash_token(token), user_id=user_id, expires_at=now + settings.session_ttl_s, now=now

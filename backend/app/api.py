@@ -46,6 +46,7 @@ def chat_turn(
             retryable=True,
             headers=retry_after_header(wait),
         )
+    llm.prepare()  # may wait for LiteLLM to finish loading after a cold start; not part of the budget
     budget = chat.Budget(
         total_s=settings.chat_budget_s,
         attempt_cap_s=settings.llm_timeout_s,

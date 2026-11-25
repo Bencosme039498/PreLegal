@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, ApiUnavailableError, apiRequest, isErrorEnvelope, setUnauthenticatedHandler } from "./api-client";
+import { ApiError, ApiUnavailableError, apiRequest, isErrorEnvelope, setApiHooks, setUnauthenticatedHandler } from "./api-client";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -136,5 +136,71 @@ describe("apiRequest and accounts", () => {
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledTimes(1);
     unsubscribeSecond();
+  });
+});
+
+describe("apiRequest hooks (lib/backend.ts)", () => {
+  it("awaits beforeRequest for every path but the health check, before the request starts", async () => {
+    const order: string[] = [];
+    const remove = setApiHooks({
+      beforeRequest: async (path) => {
+        order.push(`before ${path}`);
+      },
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      order.push(`fetch ${String(input)}`);
+      return json(200, {});
+    });
+    try {
+      await apiRequest("/api/documents", { fetchImpl });
+      await apiRequest("/api/health", { fetchImpl });
+    } finally {
+      remove();
+    }
+    expect(order).toEqual(["before /api/documents", "fetch /api/documents", "fetch /api/health"]);
+  });
+
+  it("reports every answer from the backend itself, errors included, but not a non-API response", async () => {
+    const onBackendResponse = vi.fn();
+    const remove = setApiHooks({ onBackendResponse });
+    try {
+      await apiRequest("/api/x", { fetchImpl: fetchReturning(json(200, {})) });
+      await apiRequest("/api/x", { fetchImpl: fetchReturning(json(422, { detail: [] })) }).catch(() => {});
+      await apiRequest("/api/x", { fetchImpl: fetchReturning(new Response(null, { status: 204 })) });
+      expect(onBackendResponse).toHaveBeenCalledTimes(3);
+      await apiRequest("/api/x", { fetchImpl: fetchReturning(html(502)) }).catch(() => {});
+      await apiRequest("/api/x", { fetchImpl: vi.fn<typeof fetch>().mockRejectedValue(new TypeError("x")) }).catch(() => {});
+    } finally {
+      remove();
+    }
+    expect(onBackendResponse).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps the HTTP status of a non-API response, and none for a network failure", async () => {
+    const status = (makeFetch: () => typeof fetch) =>
+      apiRequest("/api/x", { fetchImpl: makeFetch() }).catch((e: ApiUnavailableError) => e.status);
+    await expect(status(() => fetchReturning(html(404)))).resolves.toBe(404);
+    await expect(status(() => fetchReturning(html(502)))).resolves.toBe(502);
+    await expect(status(() => vi.fn<typeof fetch>().mockRejectedValue(new TypeError("x")))).resolves.toBeUndefined();
+  });
+});
+
+describe("apiRequest while the backend wakes", () => {
+  it("doesn't send a request whose caller gave up during the wake-up", async () => {
+    const controller = new AbortController();
+    const remove = setApiHooks({
+      beforeRequest: async () => {
+        controller.abort();
+      },
+    });
+    const fetchImpl = vi.fn<typeof fetch>();
+    try {
+      await expect(apiRequest("/api/chat", { fetchImpl, signal: controller.signal })).rejects.toBeInstanceOf(
+        ApiUnavailableError,
+      );
+    } finally {
+      remove();
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

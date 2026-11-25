@@ -18,7 +18,8 @@ import {
 } from "@/lib/session";
 import { buttonClass } from "../ui/button";
 import { TextField } from "../ui/TextField";
-import { useChatAvailability } from "../useChatAvailability";
+import { BackendNotice } from "../BackendNotice";
+import { useBackendStatus } from "../useBackendStatus";
 import { useSession } from "./useSession";
 
 export type AuthMode = "signin" | "signup";
@@ -52,13 +53,15 @@ const COPY = {
 
 /**
  * Sign in or create an account, then go to the dashboard. Without a backend (static hosting) there
- * are no accounts, so it offers a demo sign-in that stays on this device instead.
+ * are no accounts, so it offers a demo sign-in that stays on this device instead. A backend that is
+ * waking from sleep is not "no backend": the form waits for it (and can be filled in meanwhile).
  */
 export function AuthForm({ mode }: { mode: AuthMode }) {
   const { status } = useSession();
   const router = useRouter();
-  const availability = useChatAvailability();
-  const demo = availability === "unavailable";
+  const backend = useBackendStatus();
+  const demo = backend === "absent";
+  const waiting = backend === "waking";
   const [fields, setFields] = useState<Fields>({ name: "", email: "", password: "" });
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -90,7 +93,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     }
   };
 
-  if (availability === "checking") {
+  if (backend === "checking") {
     return (
       <p role="status" className="py-8 text-center text-sm text-stone-500">
         Loading…
@@ -102,6 +105,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   const askName = demo || mode === "signup";
   return (
     <>
+      <BackendNotice status={backend} className="mb-5" />
       {demo && (
         <p className="mb-5 rounded-lg border border-brand-blue/30 bg-brand-blue/5 px-3 py-2 text-sm text-stone-700">
           <strong className="font-semibold text-brand-navy">Demo mode.</strong> Accounts need the PreLegal server,
@@ -151,8 +155,8 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             {formError}
           </p>
         )}
-        <button type="submit" disabled={busy} className={`${buttonClass("primary", "lg")} w-full`}>
-          {busy ? copy.busy : copy.submit}
+        <button type="submit" disabled={busy || waiting} className={`${buttonClass("primary", "lg")} w-full`}>
+          {busy ? copy.busy : waiting ? "Waiting for the server…" : copy.submit}
         </button>
       </form>
       {!demo && (

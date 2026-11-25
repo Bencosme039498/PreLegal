@@ -1,6 +1,5 @@
 """FastAPI dependencies shared by the API routers (everything comes from app.state, set by create_app)."""
 
-import sqlite3
 from collections.abc import Callable, Iterator
 from typing import Annotated
 
@@ -20,8 +19,9 @@ def get_settings(request: Request) -> Settings:
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
-def get_db(settings: SettingsDep) -> Iterator[sqlite3.Connection]:
-    with db.connect(settings.db_path) as conn:
+def get_db(request: Request) -> Iterator[db.Conn]:
+    database: db.Database = request.app.state.database
+    with database.connect() as conn:
         yield conn
 
 
@@ -29,7 +29,7 @@ def get_db(settings: SettingsDep) -> Iterator[sqlite3.Connection]:
 # scope="function" commits (or rolls back) before the response is sent; the default "request" scope
 # would commit afterwards, so the client's next request could miss what it was just told was saved
 # (e.g. a new session cookie answered with 401).
-DbConn = Annotated[sqlite3.Connection, Depends(get_db, scope="function")]
+DbConn = Annotated[db.Conn, Depends(get_db, scope="function")]
 
 
 def get_catalog(request: Request) -> dict[str, TemplateDef]:

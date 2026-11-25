@@ -152,3 +152,21 @@ def test_per_call_retries_override_the_default() -> None:
     llm.complete([], Turn, max_retries=0)
     llm.complete([], Turn)
     assert [c["max_retries"] for c in calls] == [0, 1]
+
+
+def test_litellm_is_not_imported_with_the_app() -> None:
+    """The import takes most of a cold start on a small instance: the app must start without it."""
+    import subprocess
+    import sys
+
+    code = "import sys, app.main; sys.exit(1 if 'litellm' in sys.modules else 0)"
+    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
+def test_preload_loads_litellm_in_the_background() -> None:
+    from app.llm import load_litellm, preload_litellm
+
+    thread = preload_litellm()
+    assert thread.daemon
+    thread.join(timeout=120)
+    assert load_litellm() is litellm

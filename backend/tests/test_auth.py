@@ -1,8 +1,5 @@
 """Accounts: sign up, sign in, sign out, sessions and the sign-in rate limit."""
 
-import sqlite3
-from contextlib import closing
-
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -10,14 +7,9 @@ from pydantic import ValidationError
 from app import auth
 from app.config import Settings
 from app.main import create_app
-from tests.conftest import PASSWORD, FakeClock, FakeLlm, sign_up
+from tests.conftest import PASSWORD, FakeClock, FakeLlm, rows, sign_up
 
 JANE = {"name": "Jane Smith", "email": "jane@example.com", "password": PASSWORD}
-
-
-def rows(settings: Settings, sql: str) -> list[tuple]:
-    with closing(sqlite3.connect(settings.db_path)) as conn:
-        return conn.execute(sql).fetchall()
 
 
 def login(client: TestClient, email: str = "jane@example.com", password: str = PASSWORD):

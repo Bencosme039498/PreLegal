@@ -41,15 +41,15 @@ export function AppNav() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-stone-200 bg-white/90 backdrop-blur print:hidden">
-      <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-6 px-4 sm:px-6 lg:px-8">
-        <Link href="/" className="flex items-center gap-2" aria-label="PreLegal dashboard">
+      <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-3 px-4 sm:gap-6 sm:px-6 lg:px-8">
+        <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="PreLegal dashboard">
           <span
             aria-hidden="true"
             className="flex size-8 items-center justify-center rounded-lg bg-brand-navy font-serif text-lg font-bold text-brand-yellow"
           >
             P
           </span>
-          <span className="font-serif text-lg font-semibold text-brand-navy">PreLegal</span>
+          <span className="hidden font-serif text-lg font-semibold text-brand-navy sm:inline">PreLegal</span>
         </Link>
 
         <nav aria-label="Main" className="flex items-center gap-1">
@@ -59,7 +59,7 @@ export function AppNav() {
               href={link.href}
               aria-current={link.active ? "page" : undefined}
               className={
-                "rounded-md px-3 py-2 text-sm font-medium transition-colors " +
+                "rounded-md px-2 py-2 text-sm font-medium whitespace-nowrap transition-colors sm:px-3 " +
                 (link.active ? "bg-stone-100 text-brand-navy" : "text-stone-600 hover:bg-stone-50 hover:text-brand-navy")
               }
             >
@@ -68,7 +68,7 @@ export function AppNav() {
           ))}
         </nav>
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-3">
           {!user.persisted && (
             <span className="hidden rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-medium text-brand-navy sm:inline">
               Demo mode · nothing is saved

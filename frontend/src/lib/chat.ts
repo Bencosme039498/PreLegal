@@ -37,7 +37,9 @@ export const MAX_MESSAGE_CHARS = 2000;
 /** Only the latest turns are sent (mirrors MAX_HISTORY in backend/app/chat.py): the values carry the document state. */
 export const MAX_SENT_MESSAGES = 30;
 /** Above the backend's per-request budget (chat_budget_s, 50 s), so its answer or error arrives first. */
-const CHAT_TIMEOUT_MS = 60_000;
+// Covers the server's 50 s budget plus up to about a minute of the AI library still loading right
+// after a cold start, and stays below the Vercel proxy's 120 s limit.
+const CHAT_TIMEOUT_MS = 110_000;
 
 /** The assistant's opening message: for a given document, or (home page) to find the right one. */
 export function greeting(documentName?: string): string {
@@ -51,16 +53,6 @@ export function greeting(documentName?: string): string {
     `Hi! I'll help you draft a ${documentName}. Tell me about the people or companies involved and the ` +
     "main terms. Any order is fine, and I'll ask about anything that's missing."
   );
-}
-
-/** Whether a PreLegal backend answers here (false on a static-only host such as Vercel). */
-export async function isChatAvailable(init?: ApiRequestInit): Promise<boolean> {
-  try {
-    await apiRequest("/api/health", init);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
